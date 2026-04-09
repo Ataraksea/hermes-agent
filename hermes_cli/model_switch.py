@@ -872,7 +872,7 @@ def list_authenticated_providers(
         # OAuth via external credential files).
         if not has_creds:
             try:
-                from hermes_cli.auth import _load_auth_store
+                from hermes_cli.auth import _load_auth_store, get_external_process_provider_status
                 store = _load_auth_store()
                 providers_store = store.get("providers", {})
                 pool_store = store.get("credential_pool", {})
@@ -881,6 +881,9 @@ def list_authenticated_providers(
                     or pid in pool_store or hermes_slug in pool_store
                 ):
                     has_creds = True
+                elif overlay.auth_type == "external_process":
+                    status = get_external_process_provider_status(pid)
+                    has_creds = bool(status.get("configured") or status.get("logged_in"))
             except Exception as exc:
                 logger.debug("Auth store check failed for %s: %s", pid, exc)
         # Fallback: check the credential pool with full auto-seeding.
