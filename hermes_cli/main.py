@@ -1055,6 +1055,7 @@ def select_provider_and_model(args=None):
         "alibaba": "Alibaba Cloud (DashScope)",
         "huggingface": "Hugging Face",
         "xiaomi": "Xiaomi MiMo",
+        "vertex": "Google Vertex AI",
         "custom": "Custom endpoint",
     }
     active_label = provider_labels.get(active, active) if active else "none"
@@ -1089,6 +1090,7 @@ def select_provider_and_model(args=None):
         ("ai-gateway", "AI Gateway (Vercel — 200+ models, pay-per-use)"),
         ("alibaba", "Alibaba Cloud / DashScope Coding (Qwen + multi-provider)"),
         ("xiaomi", "Xiaomi MiMo (MiMo-V2 models — pro, omni, flash)"),
+        ("vertex", "Google Vertex AI (Enterprise Gemini models via GCP)"),
     ]
 
     def _named_custom_provider_map(cfg) -> dict[str, dict[str, str]]:
