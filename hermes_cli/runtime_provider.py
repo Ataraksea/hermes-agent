@@ -1313,11 +1313,17 @@ def resolve_runtime_provider(
         creds = resolve_api_key_provider_credentials(provider)
 
         # Honour model.base_url from config.yaml when the configured provider matches.
-        # Only override when the URL is the hardcoded default. Env var overrides win (#6039).
         base_url = creds.get("base_url", "").rstrip("/")
         default_url = pconfig.inference_base_url.rstrip("/")
-        if base_url == default_url and _provider_matches_config(provider, model_cfg.get("provider")):
-            base_url = (model_cfg.get("base_url") or "").strip().rstrip("/") or base_url
+        cfg_base_url = ""
+        if _provider_matches_config(provider, model_cfg.get("provider")):
+            cfg_base_url = (model_cfg.get("base_url") or "").strip().rstrip("/")
+        if provider == "lmstudio" and cfg_base_url:
+            # LM Studio users commonly persist remote hosts in config; a stale
+            # LM_BASE_URL should not silently shadow that saved endpoint.
+            base_url = cfg_base_url
+        elif base_url == default_url and cfg_base_url:
+            base_url = cfg_base_url
 
         api_mode = "chat_completions"
         if provider == "copilot":
