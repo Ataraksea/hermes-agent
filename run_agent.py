@@ -1646,6 +1646,7 @@ class AIAgent:
         # Persistent memory (MEMORY.md + USER.md) -- loaded from disk
         self._memory_store = None
         self._memory_enabled = False
+        self._memory_sync_recall = False
         self._user_profile_enabled = False
         self._memory_nudge_interval = 10
         self._turns_since_memory = 0
@@ -1654,6 +1655,7 @@ class AIAgent:
             try:
                 mem_config = _agent_cfg.get("memory", {})
                 self._memory_enabled = mem_config.get("memory_enabled", False)
+                self._memory_sync_recall = mem_config.get("sync_recall", False)
                 self._user_profile_enabled = mem_config.get("user_profile_enabled", False)
                 self._memory_nudge_interval = int(mem_config.get("nudge_interval", 10))
                 if self._memory_enabled or self._user_profile_enabled:
@@ -4574,10 +4576,11 @@ class AIAgent:
                 original_user_message, final_response,
                 session_id=self.session_id or "",
             )
-            self._memory_manager.queue_prefetch_all(
-                original_user_message,
-                session_id=self.session_id or "",
-            )
+            if not self._memory_sync_recall:
+                self._memory_manager.queue_prefetch_all(
+                    original_user_message,
+                        session_id=self.session_id or "",
+                )
         except Exception:
             pass
 
@@ -10418,7 +10421,10 @@ class AIAgent:
         if self._memory_manager:
             try:
                 _query = original_user_message if isinstance(original_user_message, str) else ""
-                _ext_prefetch_cache = self._memory_manager.prefetch_all(_query) or ""
+                if self._memory_sync_recall:
+                    _ext_prefetch_cache = self._memory_manager.recall_sync_all(_query) or ""
+                else:
+                    _ext_prefetch_cache = self._memory_manager.prefetch_all(_query) or ""
             except Exception:
                 pass
 
