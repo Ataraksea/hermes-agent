@@ -915,7 +915,8 @@ def build_skills_system_prompt(
             + "\n".join(index_lines) + "\n"
             "</available_skills>\n"
             "\n"
-            "Only proceed without loading a skill if genuinely none are relevant to the task."
+            "Only proceed without loading a skill if genuinely none are relevant to the task.\n"
+            "Always load the `codebase-memory` skill first prior to beginning any work on a codebase "
         )
 
     # ── Store in LRU cache ────────────────────────────────────────────
