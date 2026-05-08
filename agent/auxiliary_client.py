@@ -101,6 +101,7 @@ OpenAI = _OpenAIProxy()  # module-level name, resolves lazily on call/isinstance
 
 from agent.credential_pool import load_pool
 from hermes_cli.config import get_hermes_home
+from hermes_cli.timeouts import get_provider_request_timeout
 from hermes_constants import OPENROUTER_BASE_URL
 from utils import base_url_host_matches, base_url_hostname, normalize_proxy_env_vars
 
@@ -260,6 +261,7 @@ def _get_aux_model_for_provider(provider_id: str) -> str:
 # profiles). New providers should set default_aux_model on their profile instead.
 _API_KEY_PROVIDER_AUX_MODELS_FALLBACK: Dict[str, str] = {
     "gemini": "gemini-3-flash-preview",
+    "google-gemini-cli": "gemini-2.5-flash",
     "zai": "glm-4.5-flash",
     "kimi-coding": "kimi-k2-turbo-preview",
     "stepfun": "step-3.5-flash",
@@ -2125,6 +2127,14 @@ def _to_async_client(sync_client, model: str, is_vision: bool = False):
             return sync_client, model
     except ImportError:
         pass
+    try:
+        from agent.gemini_cloudcode_adapter import GeminiCloudCodeClient
+        if isinstance(sync_client, GeminiCloudCodeClient):
+            # GeminiCloudCodeClient manages its own HTTP transport
+            # (httpx-based, not OpenAI SDK); return as-is.
+            return sync_client, model
+    except ImportError:
+        pass
 
     async_kwargs = {
         "api_key": sync_client.api_key,
@@ -2569,6 +2579,17 @@ def resolve_provider_client(
                 logger.debug("resolve_provider_client: %s (%s)", provider, final_model)
                 return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
                         else (client, final_model))
+        if provider == "google-gemini-cli":
+            from agent.gemini_cloudcode_adapter import GeminiCloudCodeClient
+
+            client = GeminiCloudCodeClient(
+                api_key=api_key,
+                base_url=base_url,
+                timeout=get_provider_request_timeout(provider, final_model),
+            )
+            logger.debug("resolve_provider_client: %s (%s)", provider, final_model)
+            return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
+                    else (client, final_model))
 
         # Provider-specific headers
         headers = {}
@@ -2702,6 +2723,20 @@ def resolve_provider_client(
             return resolve_provider_client("nous", model, async_mode)
         if provider == "openai-codex":
             return resolve_provider_client("openai-codex", model, async_mode)
+        if provider == "google-gemini-cli":
+            from agent.gemini_cloudcode_adapter import GeminiCloudCodeClient
+            from hermes_cli.auth import resolve_gemini_oauth_runtime_credentials
+
+            creds = resolve_gemini_oauth_runtime_credentials()
+            final_model = _normalize_resolved_model(model or _get_aux_model_for_provider(provider), provider)
+            client = GeminiCloudCodeClient(
+                api_key=explicit_api_key or creds.get("api_key") or "",
+                base_url=explicit_base_url or creds.get("base_url") or "cloudcode-pa://google",
+                timeout=get_provider_request_timeout(provider, final_model),
+            )
+            logger.debug("resolve_provider_client: %s (%s)", provider, final_model)
+            return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
+                    else (client, final_model))
         # Other OAuth providers not directly supported
         logger.warning("resolve_provider_client: OAuth provider %s not "
                        "directly supported, try 'auto'", provider)
@@ -2759,6 +2794,7 @@ def get_async_text_auxiliary_client(task: str = "", *, main_runtime: Optional[Di
 
 
 _VISION_AUTO_PROVIDER_ORDER = (
+    "google-gemini-cli",
     "openrouter",
     "nous",
 )
@@ -2786,6 +2822,8 @@ def _resolve_strict_vision_backend(
         return resolve_provider_client("openai-codex", model, is_vision=True)
     if provider == "anthropic":
         return _try_anthropic()
+    if provider == "google-gemini-cli":
+        return resolve_provider_client("google-gemini-cli", model, is_vision=True)
     if provider == "custom":
         return _try_custom_endpoint()
     return None, None
