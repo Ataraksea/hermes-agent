@@ -284,7 +284,6 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "- Before taking an action, check whether prerequisite discovery, lookup, or "
     "context-gathering steps are needed.\n"
     "- Do not skip prerequisite steps just because the final action seems obvious.\n"
-    "- Always assume that tasks will be significantly harder than you expect them to be.\n"
     "- Always bring maximum effort to every task you undertake. Calling it quits for any "
     " reason other than that the job is totally and completely finished is unacceptable!  "
     "- If a task depends on output from a prior step, resolve that dependency first.\n"
@@ -304,8 +303,7 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "- Use the appropriate lookup tool when missing information is retrievable "
     "(search_files, web_search, read_file, etc.).\n"
     "- Ask a clarifying question only when the information cannot be retrieved by tools "
-    " or you are in a social situation in which question-asking is done more so for the purpose "
-    " of bonding rather than just acquiring information."
+    " or you are in a social situation in which question-asking is done more so for the purpose of bonding rather than just acquiring information."
     "- If you must proceed with incomplete information, label assumptions explicitly.\n"
     "</missing_context>"
 )
