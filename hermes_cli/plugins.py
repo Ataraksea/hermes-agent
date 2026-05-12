@@ -135,6 +135,7 @@ VALID_HOOKS: Set[str] = {
     # First non-None string wins. Useful for vocabulary/personality transformation.
     "transform_llm_output",
     "pre_llm_call",
+    "select_tool_schemas",
     "post_llm_call",
     "pre_api_request",
     "post_api_request",
@@ -1208,6 +1209,12 @@ class PluginManager:
 
             {"context": "recalled text..."}
             "recalled text..."          # plain string, equivalent
+
+        For ``select_tool_schemas``, callbacks receive a request-local copy of
+        the full enabled schema list and may return a replacement list. Callers
+        should apply only the first non-None list so multiple schema selectors
+        do not compose implicitly. Exceptions are swallowed here so selection
+        fails open to the original request-local schema list.
 
         Context is ALWAYS injected into the user message, never the
         system prompt.  This preserves the prompt cache prefix — the
