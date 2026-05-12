@@ -3168,7 +3168,7 @@ class AIAgent:
                 msg = (
                     "⚠ No auxiliary LLM provider configured — context "
                     "compression will drop middle turns without a summary. "
-                    "Run `hermes setup` or set OPENROUTER_API_KEY."
+                    "Run `hermes setup` or configure an auxiliary provider."
                 )
                 self._compression_warning = msg
                 self._emit_status(msg)
@@ -8639,6 +8639,8 @@ class AIAgent:
             elif _fb_is_azure:
                 # Azure OpenAI serves gpt-5.x on /chat/completions — does NOT
                 # support the Responses API. Stay on chat_completions.
+                fb_api_mode = "chat_completions"
+            elif fb_provider == "google-gemini-cli":
                 fb_api_mode = "chat_completions"
             elif self._is_direct_openai_url(fb_base_url):
                 fb_api_mode = "codex_responses"
