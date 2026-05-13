@@ -9584,22 +9584,7 @@ class AIAgent:
 
     def _build_api_kwargs(self, api_messages: list) -> dict:
         """Build the keyword arguments dict for the active API mode."""
-        # Resolve the tools array exactly once. When the long-lived
-        # prefix-cache layout is active (Claude on Anthropic / OpenRouter
-        # / Nous Portal), attach a 1h cache_control marker to the last
-        # tool — this caches the entire tools array cross-session via
-        # Anthropic's tools→system→messages prefix order. The function
-        # returns a deep copy, so self.tools is never mutated.
-        request_tools = getattr(self, "_tools_for_request", None)
-        if self._use_long_lived_prefix_cache and self.tools:
-            from agent.prompt_caching import mark_tools_for_long_lived_cache
-            tools_for_api = mark_tools_for_long_lived_cache(
-                self.tools, long_lived_ttl=self._long_lived_cache_ttl,
-            )
-        elif request_tools is not None:
-            tools_for_api = request_tools
-        else:
-            tools_for_api = self.tools
+        tools_for_api = self.tools
 
         if self.api_mode == "anthropic_messages":
             _transport = self._get_transport()
@@ -12207,41 +12192,6 @@ class AIAgent:
         except Exception as exc:
             logger.warning("pre_llm_call hook failed: %s", exc)
 
-        def _select_tools_for_request() -> list | None:
-            # Request-local schema slimming: never mutate self.tools, which is
-            # the full enabled catalog used as the starting point next turn.
-            if not self.tools:
-                return self.tools
-            tools_for_request = list(self.tools)
-            try:
-                from hermes_cli.plugins import invoke_hook as _invoke_hook
-                _schema_results = _invoke_hook(
-                    "select_tool_schemas",
-                    session_id=self.session_id,
-                    user_message=original_user_message,
-                    conversation_history=list(messages),
-                    schemas=tools_for_request,
-                    model=self.model,
-                    platform=getattr(self, "platform", None) or "",
-                    provider=(
-                        getattr(self, "provider", None)
-                        or getattr(self, "model_provider", None)
-                    ),
-                )
-                _schema_lists = [r for r in _schema_results if isinstance(r, list)]
-                if _schema_lists:
-                    if len(_schema_lists) > 1:
-                        logger.warning(
-                            "Multiple select_tool_schemas hooks returned schemas; "
-                            "using the first result"
-                        )
-                    return _schema_lists[0]
-            except Exception as exc:
-                logger.warning(
-                    "select_tool_schemas hook failed; using original tools: %s", exc
-                )
-            return tools_for_request
-
         # Main conversation loop
         api_call_count = 0
         final_response = None
@@ -12739,12 +12689,7 @@ class AIAgent:
 
                 try:
                     self._reset_stream_delivery_tracking()
-                    tools_for_request = _select_tools_for_request()
-                    self._tools_for_request = tools_for_request
-                    try:
-                        api_kwargs = self._build_api_kwargs(api_messages)
-                    finally:
-                        self._tools_for_request = None
+                    api_kwargs = self._build_api_kwargs(api_messages)
                     if self._force_ascii_payload:
                         _sanitize_structure_non_ascii(api_kwargs)
                     if self.api_mode == "codex_responses":
@@ -12763,7 +12708,7 @@ class AIAgent:
                             api_mode=self.api_mode,
                             api_call_count=api_call_count,
                             message_count=len(api_messages),
-                            tool_count=len(tools_for_request if tools_for_request is not None else (self.tools or [])),
+                            tool_count=len(self.tools or []),
                             approx_input_tokens=approx_tokens,
                             request_char_count=total_chars,
                             max_tokens=self.max_tokens,
