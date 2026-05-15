@@ -2597,6 +2597,56 @@ def _resolve_auto(main_runtime: Optional[Dict[str, Any]] = None) -> Tuple[Option
 # below — never look up auth env vars ad-hoc.
 
 
+class _AsyncGeminiCloudCodeCompletions:
+    """Async ``chat.completions`` shim for GeminiCloudCodeClient.
+
+    The sync ``GeminiCloudCodeClient.chat.completions.create()`` issues
+    blocking httpx requests, so it is offloaded to a worker thread to keep
+    the event loop free.
+    """
+
+    def __init__(self, sync_client):
+        self._sync_client = sync_client
+
+    async def create(self, **kwargs: Any) -> Any:
+        import asyncio
+        return await asyncio.to_thread(
+            self._sync_client.chat.completions.create, **kwargs
+        )
+
+
+class _AsyncGeminiCloudCodeChat:
+    def __init__(self, sync_client):
+        self.completions = _AsyncGeminiCloudCodeCompletions(sync_client)
+
+
+class AsyncGeminiCloudCodeClient:
+    """Async-compatible wrapper over a sync ``GeminiCloudCodeClient``.
+
+    ``GeminiCloudCodeClient`` exposes only a *sync* ``.chat.completions
+    .create()``. Async consumers (``async_call_llm``) await that call, so the
+    sync client cannot be returned directly. This wrapper exposes an
+    awaitable ``create()`` that delegates to the sync client via
+    ``asyncio.to_thread``, and mirrors the attributes the aux cache /
+    logging / cleanup paths rely on.
+    """
+
+    def __init__(self, sync_client):
+        self._sync_client = sync_client
+        self.chat = _AsyncGeminiCloudCodeChat(sync_client)
+        self.api_key = sync_client.api_key
+        self.base_url = sync_client.base_url
+        # GeminiCloudCodeClient is itself the leaf client (no OpenAI client
+        # beneath it), so cache eviction by leaf client points here directly.
+        self._real_client = sync_client
+
+    def close(self) -> None:
+        # Sync close so the aux cache cleanup paths (which call or skip a
+        # sync ``close()``) can dispose of this client; the underlying
+        # GeminiCloudCodeClient exposes only a blocking ``close()``.
+        self._sync_client.close()
+
+
 def _to_async_client(sync_client, model: str, is_vision: bool = False):
     """Convert a sync client to its async counterpart, preserving Codex routing.
 
@@ -2616,6 +2666,16 @@ def _to_async_client(sync_client, model: str, is_vision: bool = False):
 
         if isinstance(sync_client, GeminiNativeClient):
             return AsyncGeminiNativeClient(sync_client), model
+    except ImportError:
+        pass
+    try:
+        from agent.gemini_cloudcode_adapter import GeminiCloudCodeClient
+
+        # GeminiCloudCodeClient exposes only a blocking sync
+        # .chat.completions.create(); wrap it so async consumers can await
+        # the call without blocking the event loop.
+        if isinstance(sync_client, GeminiCloudCodeClient):
+            return AsyncGeminiCloudCodeClient(sync_client), model
     except ImportError:
         pass
     try:
@@ -3201,6 +3261,20 @@ def resolve_provider_client(
             return resolve_provider_client("nous", model, async_mode)
         if provider == "openai-codex":
             return resolve_provider_client("openai-codex", model, async_mode)
+        if provider == "google-gemini-cli":
+            # Gemini CLI / Cloud Code Assist uses Google OAuth, not an API key.
+            # Its adapter exposes the same .chat.completions.create() surface
+            # as OpenAI clients, so text-only auxiliary tasks (compression,
+            # title generation, etc.) can use it directly when explicitly
+            # selected via auxiliary.<task>.provider.
+            from agent.gemini_cloudcode_adapter import GeminiCloudCodeClient
+
+            final_model = _normalize_resolved_model(
+                model or _get_aux_model_for_provider(provider), provider
+            )
+            client = GeminiCloudCodeClient()
+            return (_to_async_client(client, final_model, is_vision=is_vision)
+                    if async_mode else (client, final_model))
         # Other OAuth providers not directly supported
         logger.warning("resolve_provider_client: OAuth provider %s not "
                        "directly supported, try 'auto'", provider)
@@ -3647,6 +3721,28 @@ def _force_close_async_httpx(client: Any) -> None:
         pass
 
 
+def _close_cached_client_for_eviction(client: Any) -> None:
+    """Clean up a cached client that is being evicted from the cache.
+
+    Marks any async httpx transport as closed (so ``__del__`` cannot
+    schedule ``aclose()`` on a dead loop) and then invokes a synchronous
+    ``close()`` if the client exposes one.  This ensures wrapper clients
+    like ``AsyncGeminiCloudCodeClient`` — whose ``close()`` releases an
+    underlying *sync* resource — are not leaked when evicted via the
+    stale/max-size paths.  Exceptions are swallowed, matching
+    ``shutdown_cached_clients``.
+    """
+    import inspect
+
+    _force_close_async_httpx(client)
+    try:
+        close_fn = getattr(client, "close", None)
+        if close_fn and not inspect.iscoroutinefunction(close_fn):
+            close_fn()
+    except Exception:
+        pass
+
+
 def shutdown_cached_clients() -> None:
     """Close all cached clients (sync and async) to prevent event-loop errors.
 
@@ -3687,7 +3783,7 @@ def cleanup_stale_async_clients() -> None:
         for key, entry in _client_cache.items():
             client, _default, cached_loop = entry
             if cached_loop is not None and cached_loop.is_closed():
-                _force_close_async_httpx(client)
+                _close_cached_client_for_eviction(client)
                 stale_keys.append(key)
         for key in stale_keys:
             del _client_cache[key]
@@ -3780,7 +3876,7 @@ def _get_cached_client(
                     effective = _compat_model(cached_client, model, cached_default)
                     return cached_client, effective
                 # Stale — evict and fall through to create a new client.
-                _force_close_async_httpx(cached_client)
+                _close_cached_client_for_eviction(cached_client)
                 del _client_cache[cache_key]
             else:
                 effective = _compat_model(cached_client, model, cached_default)
@@ -3806,7 +3902,7 @@ def _get_cached_client(
                 # the oldest entries (FIFO — dict preserves insertion order).
                 while len(_client_cache) >= _CLIENT_CACHE_MAX_SIZE:
                     evict_key, evict_entry = next(iter(_client_cache.items()))
-                    _force_close_async_httpx(evict_entry[0])
+                    _close_cached_client_for_eviction(evict_entry[0])
                     del _client_cache[evict_key]
                 _client_cache[cache_key] = (client, default_model, bound_loop)
             else:
