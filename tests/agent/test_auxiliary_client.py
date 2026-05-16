@@ -84,6 +84,111 @@ class TestNormalizeAuxProvider:
         assert _normalize_aux_provider("copilot-acp-agent") == "copilot-acp"
 
 
+class TestGeminiCliAuxiliaryProvider:
+    def test_explicit_google_gemini_cli_returns_cloudcode_client(self):
+        fake_client = MagicMock()
+        with patch(
+            "agent.gemini_cloudcode_adapter.GeminiCloudCodeClient",
+            return_value=fake_client,
+        ) as mock_client:
+            client, model = resolve_provider_client(
+                "google-gemini-cli",
+                model="gemini-3-flash-preview",
+            )
+
+        assert client is fake_client
+        assert model == "gemini-3-flash-preview"
+        mock_client.assert_called_once_with()
+
+    def test_explicit_google_gemini_cli_falls_back_to_profile_default_model(self):
+        """With no explicit model, the provider profile's default_aux_model is used."""
+        fake_client = MagicMock()
+        with patch(
+            "agent.gemini_cloudcode_adapter.GeminiCloudCodeClient",
+            return_value=fake_client,
+        ) as mock_client:
+            client, model = resolve_provider_client("google-gemini-cli")
+
+        assert client is fake_client
+        assert model == "gemini-3-flash-preview"
+        mock_client.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_explicit_google_gemini_cli_async_returns_cloudcode_client(self):
+        """Async resolution wraps the sync cloud-code client in an awaitable
+        adapter — its chat.completions.create() is a coroutine that delegates
+        to the sync client without any real OAuth/network call."""
+        from agent.auxiliary_client import AsyncGeminiCloudCodeClient
+
+        client, model = resolve_provider_client(
+            "google-gemini-cli",
+            model="gemini-3-flash-preview",
+            async_mode=True,
+        )
+
+        assert isinstance(client, AsyncGeminiCloudCodeClient)
+        assert model == "gemini-3-flash-preview"
+
+        # Stub the underlying sync create() so awaiting the wrapper resolves
+        # without OAuth/HTTP. asyncio.to_thread runs the plain function in a
+        # worker thread and the coroutine yields its return value.
+        sentinel = SimpleNamespace(id="chatcmpl-test")
+        client._sync_client.chat.completions.create = MagicMock(
+            return_value=sentinel
+        )
+
+        result = await client.chat.completions.create(model=model, messages=[])
+
+        assert result is sentinel
+        client._sync_client.chat.completions.create.assert_called_once_with(
+            model=model, messages=[]
+        )
+        # close() is sync so the aux cache cleanup paths can dispose it;
+        # it must close the underlying sync client.
+        client._sync_client.close = MagicMock()
+        client.close()
+        client._sync_client.close.assert_called_once_with()
+
+    def test_stale_async_cleanup_closes_gemini_cli_sync_client(self):
+        """cleanup_stale_async_clients() must invoke the wrapper's sync
+        close() — not just _force_close_async_httpx — so an
+        AsyncGeminiCloudCodeClient evicted on a closed loop releases its
+        underlying sync client instead of leaking it (#cache-cleanup)."""
+        import asyncio
+
+        from agent.auxiliary_client import (
+            AsyncGeminiCloudCodeClient,
+            _client_cache,
+            _client_cache_lock,
+            cleanup_stale_async_clients,
+        )
+
+        client, _model = resolve_provider_client(
+            "google-gemini-cli",
+            model="gemini-3-flash-preview",
+            async_mode=True,
+        )
+        assert isinstance(client, AsyncGeminiCloudCodeClient)
+        client._sync_client.close = MagicMock()
+
+        closed_loop = asyncio.new_event_loop()
+        closed_loop.close()
+        cache_key = ("google-gemini-cli", True, None, None, None)
+
+        with _client_cache_lock:
+            saved = dict(_client_cache)
+            _client_cache.clear()
+            _client_cache[cache_key] = (client, "gemini-3-flash-preview", closed_loop)
+        try:
+            cleanup_stale_async_clients()
+            client._sync_client.close.assert_called_once_with()
+            assert cache_key not in _client_cache
+        finally:
+            with _client_cache_lock:
+                _client_cache.clear()
+                _client_cache.update(saved)
+
+
 class TestReadCodexAccessToken:
     def test_valid_auth_store(self, tmp_path, monkeypatch):
         hermes_home = tmp_path / "hermes"

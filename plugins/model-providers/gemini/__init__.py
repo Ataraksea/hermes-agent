@@ -66,7 +66,7 @@ google_gemini_cli = GeminiProfile(
     env_vars=(),  # OAuth — no API key
     base_url="cloudcode-pa://google",  # Cloud Code Assist internal scheme
     auth_type="oauth_external",
-    default_aux_model="gemini-2.5-flash",
+    default_aux_model="gemini-3-flash-preview",
 )
 
 register_provider(gemini)
