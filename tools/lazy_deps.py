@@ -83,6 +83,11 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "provider.bedrock": ("boto3==1.42.89",),
     # Google Vertex AI provider — service-account / ADC auth for Gemini on GCP.
     "provider.vertex": ("google-auth>=2.0.0,<3",),
+    # Microsoft Foundry — Entra ID auth (managed identity, workload identity,
+    # service principal, az login, VS Code, azd, PowerShell). Only loaded
+    # when model.auth_mode=entra_id is selected; key-based azure-foundry
+    # users never pay this import.
+    "provider.azure_identity": ("azure-identity==1.25.3",),
 
     # ─── Web search backends ───────────────────────────────────────────────
     "search.exa": ("exa-py==2.10.2",),
