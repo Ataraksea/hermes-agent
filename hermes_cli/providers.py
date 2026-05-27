@@ -60,6 +60,11 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         auth_type="oauth_external",
         base_url_override="https://chatgpt.com/backend-api/codex",
     ),
+    "openai-api": HermesOverlay(
+        transport="codex_responses",
+        base_url_override="https://api.openai.com/v1",
+        base_url_env_var="OPENAI_BASE_URL",
+    ),
     "xai-oauth": HermesOverlay(
         transport="codex_responses",
         auth_type="oauth_external",
@@ -146,10 +151,6 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
     "alibaba-coding-plan": HermesOverlay(
         transport="openai_chat",
         base_url_env_var="ALIBABA_CODING_PLAN_BASE_URL",
-    ),
-    "vercel": HermesOverlay(
-        transport="openai_chat",
-        is_aggregator=True,
     ),
     "opencode": HermesOverlay(
         transport="openai_chat",
@@ -294,11 +295,6 @@ ALIASES: Dict[str, str] = {
     "github": "github-copilot",
     "github-copilot-acp": "copilot-acp",
 
-    # vercel (models.dev ID for AI Gateway)
-    "ai-gateway": "vercel",
-    "aigateway": "vercel",
-    "vercel-ai-gateway": "vercel",
-
     # opencode (models.dev ID for OpenCode Zen)
     "opencode-zen": "opencode",
     "zen": "opencode",
@@ -394,6 +390,7 @@ _LABEL_OVERRIDES: Dict[str, str] = {
     "bedrock": "AWS Bedrock",
     "ollama-cloud": "Ollama Cloud",
     "vertex": "Google Vertex AI",
+    "xai-oauth": "xAI Grok OAuth (SuperGrok / Premium+)",
 }
 
 
