@@ -84,3 +84,4 @@ models-dev-upstream/
 hermes_cli/tui_dist/*
 hermes_cli/scripts/
 docs/superpowers/*
+.virtualcontext/store.db
