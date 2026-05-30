@@ -996,7 +996,9 @@ _PROVIDER_ALIASES = {
     "qwen-portal": "qwen-oauth",
     "gemini-cli": "google-gemini-cli",
     "gemini-oauth": "google-gemini-cli",
-    "vertex-ai": "vertex",
+    # "vertex-ai" is intentionally NOT aliased to "vertex": it is a distinct
+    # provider for Claude-on-Vertex (anthropic_messages), whereas "vertex" is
+    # Gemini-on-Vertex (openai_chat). Only "google-vertex" aliases to Gemini.
     "google-vertex": "vertex",
     "hf": "huggingface",
     "hugging-face": "huggingface",

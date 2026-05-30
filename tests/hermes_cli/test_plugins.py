@@ -134,10 +134,11 @@ class TestPluginDiscovery:
         mgr.discover_and_load()
         mgr.discover_and_load()  # second call should no-op
 
-        # Filter out bundled plugins — they're always discovered.
+        # Filter out bundled + pip entry-point plugins — only user/project
+        # plugins created in this test should appear.
         non_bundled = {
             n: p for n, p in mgr._plugins.items()
-            if p.manifest.source != "bundled"
+            if p.manifest.source not in ("bundled", "entrypoint")
         }
         assert len(non_bundled) == 1
 
@@ -150,10 +151,11 @@ class TestPluginDiscovery:
         mgr = PluginManager()
         mgr.discover_and_load()
 
-        # Filter out bundled plugins — they're always discovered.
+        # Filter out bundled + pip entry-point plugins — only user/project
+        # plugins created in this test should appear.
         non_bundled = {
             n: p for n, p in mgr._plugins.items()
-            if p.manifest.source != "bundled"
+            if p.manifest.source not in ("bundled", "entrypoint")
         }
         assert len(non_bundled) == 0
 

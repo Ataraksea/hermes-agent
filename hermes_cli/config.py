@@ -285,9 +285,10 @@ def detect_install_method(project_root: Optional[Path] = None) -> str:
     Resolution order:
     1. Stamped ``~/.hermes/.install_method`` file (written by installers)
     2. HERMES_MANAGED env / .managed marker (NixOS, Homebrew)
-    3. Container detection (/.dockerenv, /run/.containerenv, cgroup)
-    4. .git directory presence -> 'git'
-    5. Fallback -> 'pip'
+    3. ``.git`` directory in *project_root* -> ``git`` (even inside a container —
+       dev bind-mounts and devcontainers have a working tree to pull)
+    4. Container detection (/.dockerenv, /run/.containerenv, cgroup)
+    5. Fallback -> ``pip``
     """
     stamp = get_hermes_home() / ".install_method"
     try:
@@ -299,13 +300,17 @@ def detect_install_method(project_root: Optional[Path] = None) -> str:
     managed = get_managed_system()
     if managed:
         return managed.lower().replace(" ", "-")
+    if project_root is None:
+        project_root = Path(__file__).parent.parent.resolve()
+    # A git checkout inside a container (dev env, Cursor sandbox, devcontainer)
+    # should still use the git update path.  The Docker bail-out in cmd_update
+    # targets the published image where .git is absent — not bind-mounted
+    # source trees that happen to run under /.dockerenv.
+    if (project_root / ".git").is_dir():
+        return "git"
     from hermes_constants import is_container
     if is_container():
         return "docker"
-    if project_root is None:
-        project_root = Path(__file__).parent.parent.resolve()
-    if (project_root / ".git").is_dir():
-        return "git"
     return "pip"
 
 

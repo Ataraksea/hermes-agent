@@ -73,6 +73,12 @@ def mock_sd(monkeypatch):
 # ============================================================================
 
 class TestDetectAudioEnvironment:
+    @pytest.fixture(autouse=True)
+    def _host_like_audio_env(self, monkeypatch):
+        """Cursor/WSL dev sandboxes expose /.dockerenv and WSL /proc/version."""
+        monkeypatch.setattr("hermes_constants.is_container", lambda: False)
+        monkeypatch.setattr("builtins.open", _non_wsl_proc_version(open))
+
     def test_clean_environment_is_available(self, monkeypatch):
         """No SSH, Docker, or WSL — should be available."""
         monkeypatch.delenv("SSH_CLIENT", raising=False)

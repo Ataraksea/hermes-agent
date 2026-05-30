@@ -31,6 +31,7 @@ def _bare_agent():
 
     agent = AIAgent.__new__(AIAgent)
     agent._memory_manager = MagicMock()
+    agent._memory_sync_recall = False
     # session_id is now propagated into sync_all / queue_prefetch_all so
     # providers that cache per-session state can update it mid-process
     # (see #6672).

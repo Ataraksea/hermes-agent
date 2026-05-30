@@ -868,12 +868,24 @@ def build_vertex_client(project: str, region: str = "us-east5"):
     Returns:
         AnthropicVertex client instance (same interface as Anthropic)
     """
+    # Best-effort lazy install of anthropic[vertex] (pulls google-auth/google-cloud).
+    # The `vertex-ai` extra is not in [all] per the lazy-install policy, so a user
+    # who installed plain `hermes-agent` and only later selected the vertex-ai
+    # provider still gets the dependency on first use. Mirrors the Gemini path in
+    # agent/vertex_adapter.py; failures fall through to the explicit ImportError.
+    try:
+        from tools.lazy_deps import ensure as _lazy_ensure
+        _lazy_ensure("provider.vertex-ai", prompt=False)
+    except Exception:
+        pass
+
     try:
         from anthropic import AnthropicVertex
     except ImportError:
         raise ImportError(
-            "anthropic[vertex] is required for Vertex AI provider. "
-            "Install with: pip install 'anthropic[vertex]'"
+            "anthropic[vertex] is required for the vertex-ai provider. "
+            "Install with: pip install 'hermes-agent[vertex-ai]' "
+            "(or: pip install 'anthropic[vertex]')"
         )
 
     from httpx import Timeout

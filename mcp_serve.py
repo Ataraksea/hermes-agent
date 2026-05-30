@@ -219,9 +219,9 @@ class EventBridge:
         self._last_poll_timestamps: Dict[str, float] = {}  # session_key -> unix timestamp
         # In-memory approval tracking (populated from events)
         self._pending_approvals: Dict[str, dict] = {}
-        # mtime cache — skip expensive work when files haven't changed
-        self._sessions_json_mtime: float = 0.0
-        self._state_db_mtime: float = 0.0
+        # Change caches — skip expensive work when files haven't changed.
+        self._sessions_json_signature: tuple[int, int, int] = (0, 0, 0)
+        self._state_db_signature: tuple[int, int, int] = (0, 0, 0)
         self._cached_sessions_index: dict = {}
 
     def start(self):
@@ -349,16 +349,30 @@ class EventBridge:
         Uses mtime checks on sessions.json and state.db to skip work
         when nothing has changed — makes 200ms polling essentially free.
         """
-        # Check if sessions.json has changed (mtime check is ~1μs)
+        # Check if sessions.json has changed.  The file is tiny and tests can
+        # rewrite same-sized JSON within one filesystem timestamp tick, so
+        # compare parsed content rather than trusting mtime alone.
         sessions_file = _get_sessions_dir() / "sessions.json"
         try:
-            sj_mtime = sessions_file.stat().st_mtime if sessions_file.exists() else 0.0
+            sj_stat = sessions_file.stat() if sessions_file.exists() else None
+            sj_signature = (
+                sj_stat.st_mtime_ns,
+                sj_stat.st_ctime_ns,
+                sj_stat.st_size,
+            ) if sj_stat else (0, 0, 0)
         except OSError:
-            sj_mtime = 0.0
+            sj_signature = (0, 0, 0)
 
-        if sj_mtime != self._sessions_json_mtime:
-            self._sessions_json_mtime = sj_mtime
-            self._cached_sessions_index = _load_sessions_index()
+        current_sessions_index = _load_sessions_index()
+        if (
+            sj_signature != self._sessions_json_signature
+            or current_sessions_index != self._cached_sessions_index
+        ):
+            self._sessions_json_signature = sj_signature
+            self._cached_sessions_index = current_sessions_index
+            sessions_changed = True
+        else:
+            sessions_changed = False
 
         # Check if state.db has changed
         try:
@@ -368,14 +382,20 @@ class EventBridge:
             db_file = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")) / "state.db"
 
         try:
-            db_mtime = db_file.stat().st_mtime if db_file.exists() else 0.0
+            db_stat = db_file.stat() if db_file.exists() else None
+            db_signature = (
+                db_stat.st_mtime_ns,
+                db_stat.st_ctime_ns,
+                db_stat.st_size,
+            ) if db_stat else (0, 0, 0)
         except OSError:
-            db_mtime = 0.0
+            db_signature = (0, 0, 0)
 
-        if db_mtime == self._state_db_mtime and sj_mtime == self._sessions_json_mtime:
+        db_changed = db_signature != self._state_db_signature
+        if not sessions_changed and not db_changed:
             return  # Nothing changed since last poll — skip entirely
 
-        self._state_db_mtime = db_mtime
+        self._state_db_signature = db_signature
         entries = self._cached_sessions_index
 
         for session_key, entry in entries.items():

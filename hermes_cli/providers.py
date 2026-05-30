@@ -91,6 +91,18 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
             "VERTEX_PROJECT_ID",
         ),
     ),
+    # Claude-on-Vertex: served via the AnthropicVertex SDK (anthropic_messages),
+    # authenticated with GCP ADC / service account. Distinct from the Gemini
+    # "vertex" overlay above; provider id is "vertex-ai".
+    "vertex-ai": HermesOverlay(
+        transport="anthropic_messages",
+        auth_type="api_key",
+        extra_env_vars=(
+            "VERTEX_PROJECT",
+            "GOOGLE_CLOUD_PROJECT",
+            "GCP_PROJECT_ID",
+        ),
+    ),
     "lmstudio": HermesOverlay(
         transport="openai_chat",
         auth_type="api_key",
@@ -324,8 +336,8 @@ ALIASES: Dict[str, str] = {
     "gemini-cli": "google-gemini-cli",
     "gemini-oauth": "google-gemini-cli",
 
-    # google vertex
-    "vertex-ai": "vertex",
+    # google vertex (Gemini). NB: "vertex-ai" is intentionally NOT aliased here —
+    # it is a distinct provider id for Claude-on-Vertex (anthropic_messages).
     "google-vertex": "vertex",
 
     # huggingface
@@ -390,6 +402,7 @@ _LABEL_OVERRIDES: Dict[str, str] = {
     "bedrock": "AWS Bedrock",
     "ollama-cloud": "Ollama Cloud",
     "vertex": "Google Vertex AI",
+    "vertex-ai": "Google Vertex AI (Claude)",
     "xai-oauth": "xAI Grok OAuth (SuperGrok / Premium+)",
 }
 

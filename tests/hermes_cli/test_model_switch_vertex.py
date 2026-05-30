@@ -15,7 +15,8 @@ _MOCK_VALIDATION = {
 def test_vertex_is_known_to_shared_provider_registry():
     """The shared /model pipeline resolves providers through hermes_cli.providers."""
     assert normalize_provider("vertex") == "vertex"
-    assert normalize_provider("vertex-ai") == "vertex"
+    # "vertex-ai" is a DISTINCT provider (Claude-on-Vertex), NOT a Gemini alias.
+    assert normalize_provider("vertex-ai") == "vertex-ai"
     assert normalize_provider("google-vertex") == "vertex"
 
     resolved = resolve_provider_full("vertex")
@@ -24,6 +25,17 @@ def test_vertex_is_known_to_shared_provider_registry():
     assert resolved.name == "Google Vertex AI"
     assert resolved.auth_type == "vertex"
     assert get_label("vertex") == "Google Vertex AI"
+
+
+def test_vertex_ai_is_distinct_claude_provider():
+    """`vertex-ai` resolves to the Claude-on-Vertex provider (anthropic_messages
+    transport), NOT the Gemini `vertex` provider."""
+    resolved = resolve_provider_full("vertex-ai")
+    assert resolved is not None
+    assert resolved.id == "vertex-ai"
+    assert resolved.transport == "anthropic_messages"
+    assert resolved.name == "Google Vertex AI (Claude)"
+    assert get_label("vertex-ai") == "Google Vertex AI (Claude)"
 
 
 def test_switch_model_accepts_explicit_vertex_provider(monkeypatch):

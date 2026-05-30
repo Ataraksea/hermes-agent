@@ -176,10 +176,32 @@ class TestVertexPublisherPrefix:
     def test_preview_model_gets_prefix(self):
         assert normalize_model_for_provider("gemini-3.1-pro-preview", "vertex") == "google/gemini-3.1-pro-preview"
 
-    def test_aliases_resolve_to_vertex_for_normalization(self):
-        # Both aliases should produce the same prefixed result
-        assert normalize_model_for_provider("gemini-2.5-flash", "vertex-ai") == "google/gemini-2.5-flash"
+    def test_google_vertex_alias_resolves_for_normalization(self):
+        # "google-vertex" is still a Gemini alias → google/ publisher prefix.
+        # ("vertex-ai" is intentionally NOT — see TestVertexAiClaudeNormalization.)
         assert normalize_model_for_provider("gemini-2.5-flash", "google-vertex") == "google/gemini-2.5-flash"
+
+
+class TestVertexAiClaudeNormalization:
+    """`vertex-ai` is Claude-on-Vertex (AnthropicVertex), not Gemini-on-Vertex.
+
+    It must NOT receive the google/ publisher prefix; it expects bare,
+    hyphenated claude-* ids like the native Anthropic path.
+    """
+
+    @pytest.mark.parametrize("model,expected", [
+        ("claude-sonnet-4.6", "claude-sonnet-4-6"),
+        ("claude-haiku-4-5", "claude-haiku-4-5"),
+        ("anthropic/claude-sonnet-4.6", "claude-sonnet-4-6"),
+        ("vertex-ai/claude-opus-4.5", "claude-opus-4-5"),
+    ])
+    def test_vertex_ai_uses_claude_format(self, model, expected):
+        assert normalize_model_for_provider(model, "vertex-ai") == expected
+
+    def test_vertex_ai_never_gets_google_prefix(self):
+        assert not normalize_model_for_provider(
+            "claude-sonnet-4.6", "vertex-ai"
+        ).startswith("google/")
 
 
 class TestIssue6211NativeProviderPrefixNormalization:

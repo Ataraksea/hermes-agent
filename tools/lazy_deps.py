@@ -83,6 +83,11 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "provider.bedrock": ("boto3==1.42.89",),
     # Google Vertex AI provider — service-account / ADC auth for Gemini on GCP.
     "provider.vertex": ("google-auth>=2.0.0,<3",),
+    # Google Vertex AI (Claude) provider — Claude served on GCP via the
+    # AnthropicVertex SDK; the [vertex] extra pulls google-auth/google-cloud.
+    # Pinned to the same anthropic version as provider.anthropic so a user who
+    # runs both native Anthropic and Claude-on-Vertex doesn't churn the pin.
+    "provider.vertex-ai": ("anthropic[vertex]==0.87.0",),  # CVE-2026-34450, CVE-2026-34452
     # Microsoft Foundry — Entra ID auth (managed identity, workload identity,
     # service principal, az login, VS Code, azd, PowerShell). Only loaded
     # when model.auth_mode=entra_id is selected; key-based azure-foundry
