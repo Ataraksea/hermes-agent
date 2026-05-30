@@ -175,6 +175,13 @@ web = ["fastapi==0.133.1", "uvicorn[standard]==0.41.0"]
 # lazy-install policy below — google-auth is resolved at first use via
 # LAZY_DEPS["provider.vertex"] when a user actually selects vertex.
 vertex = ["google-auth>=2.0.0,<3"]
+# Vertex AI (Claude) provider — Claude models served on GCP via the
+# AnthropicVertex SDK (anthropic[vertex]), authenticated with GCP ADC /
+# service account. Distinct from the `vertex` extra above (Gemini-on-Vertex):
+# provider id is `vertex-ai`, api_mode is anthropic_messages. Pinned to the
+# same anthropic version as the [anthropic] extra. Not in [all] per the
+# lazy-install policy below.
+vertex-ai = ["anthropic[vertex]==0.86.0"]
 all = [
   # Policy (2026-05-12): `[all]` includes only extras that genuinely
   # CAN'T be lazy-installed via `tools/lazy_deps.py` — i.e. things every

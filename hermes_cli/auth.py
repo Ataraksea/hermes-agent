@@ -314,6 +314,13 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
         base_url_env_var="ANTHROPIC_BASE_URL",
     ),
+    "vertex-ai": ProviderConfig(
+        id="vertex-ai",
+        name="Google Vertex AI (Claude)",
+        auth_type="api_key",
+        inference_base_url="",
+        api_key_env_vars=("VERTEX_PROJECT",),
+    ),
     "alibaba": ProviderConfig(
         id="alibaba",
         name="Qwen Cloud",

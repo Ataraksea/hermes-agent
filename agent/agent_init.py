@@ -303,6 +303,10 @@ def init_agent(
     elif (provider_name is None) and agent._base_url_hostname == "api.x.ai":
         agent.api_mode = "codex_responses"
         agent.provider = "xai"
+    elif agent.provider == "vertex-ai":
+        # Claude on Google Vertex AI — speaks the Anthropic Messages API via
+        # the AnthropicVertex SDK (auth handled below from GCP ADC, not a key).
+        agent.api_mode = "anthropic_messages"
     elif agent.provider == "anthropic" or (provider_name is None and agent._base_url_hostname == "api.anthropic.com"):
         agent.api_mode = "anthropic_messages"
         agent.provider = "anthropic"
@@ -581,7 +585,27 @@ def init_agent(
     # Claude uses its own timeout path and is not covered here.
     _provider_timeout = get_provider_request_timeout(agent.provider, agent.model)
 
-    if agent.api_mode == "anthropic_messages":
+    if agent.api_mode == "anthropic_messages" and agent.provider == "vertex-ai":
+        # Vertex AI (Claude) — AnthropicVertex SDK authenticated via GCP
+        # Application Default Credentials / service account. There is no
+        # static API key; project + region are resolved from the environment
+        # (VERTEX_PROJECT / VERTEX_REGION). Requires the `vertex-ai` extra
+        # (anthropic[vertex]).
+        from agent.anthropic_adapter import build_vertex_client, resolve_vertex_credentials
+        project, region = resolve_vertex_credentials()
+        if not project:
+            raise ValueError("VERTEX_PROJECT environment variable is required for vertex-ai provider")
+        agent._anthropic_client = build_vertex_client(project, region)
+        agent.api_key = ""
+        agent._anthropic_api_key = ""
+        agent._anthropic_base_url = ""
+        agent._is_anthropic_oauth = False
+        agent.client = None
+        agent._client_kwargs = {}
+        if not agent.quiet_mode:
+            print(f"🤖 AI Agent initialized with model: {agent.model} (Vertex AI)")
+            print(f"☁️  GCP project: {project}, region: {region}")
+    elif agent.api_mode == "anthropic_messages":
         from agent.anthropic_adapter import build_anthropic_client, resolve_anthropic_token
         # Bedrock + Claude → use AnthropicBedrock SDK for full feature parity
         # (prompt caching, thinking budgets, adaptive thinking).
