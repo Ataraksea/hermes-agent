@@ -392,28 +392,14 @@ def normalize_model_for_provider(model_input: str, target_provider: str) -> str:
     if provider in _AGGREGATOR_PROVIDERS:
         return _prepend_vendor(name)
 
-    # --- Vertex AI (Gemini): OpenAPI endpoint strictly requires google/ publisher prefix ---
+    # --- Vertex AI: OpenAI-compatible endpoint requires ``google/`` prefix ---
+    # Users can type bare ``gemini-3.5-flash`` and it auto-resolves to
+    # ``google/gemini-3.5-flash``, mirroring how aggregators prepend their
+    # own vendor slugs. Already-prefixed names pass through unchanged.
     if provider == "vertex":
-        bare = _strip_matching_provider_prefix(name, provider)
-        if not bare.startswith("google/"):
-            return f"google/{bare}"
-        return bare
-
-    # --- Vertex AI (Claude): served via the AnthropicVertex SDK, which expects
-    #     bare hyphenated claude-* ids — NOT the google/ publisher prefix the
-    #     Gemini `vertex` path uses. Strip an anthropic/ or vertex-ai/ vendor
-    #     prefix the user may have copied from another config, then convert
-    #     dots -> hyphens, mirroring the native Anthropic path. ---
-    if provider == "vertex-ai":
-        bare = name
-        lowered = bare.lower()
-        for _pfx in ("vertex-ai/", "anthropic/"):
-            if lowered.startswith(_pfx):
-                bare = bare[len(_pfx):]
-                break
-        if "/" in bare:
-            return bare
-        return _dots_to_hyphens(bare)
+        if name.startswith("google/"):
+            return name
+        return f"google/{name}"
 
     # --- OpenCode Zen / OpenCode Go: flat-namespace resellers.
     #     Their /v1/models API returns bare IDs only (no vendor prefix), and

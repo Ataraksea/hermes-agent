@@ -84,24 +84,9 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
     ),
     "vertex": HermesOverlay(
         transport="openai_chat",
-        auth_type="vertex",
-        extra_env_vars=(
-            "VERTEX_CREDENTIALS_PATH",
-            "GOOGLE_APPLICATION_CREDENTIALS",
-            "VERTEX_PROJECT_ID",
-        ),
-    ),
-    # Claude-on-Vertex: served via the AnthropicVertex SDK (anthropic_messages),
-    # authenticated with GCP ADC / service account. Distinct from the Gemini
-    # "vertex" overlay above; provider id is "vertex-ai".
-    "vertex-ai": HermesOverlay(
-        transport="anthropic_messages",
         auth_type="api_key",
-        extra_env_vars=(
-            "VERTEX_PROJECT",
-            "GOOGLE_CLOUD_PROJECT",
-            "GCP_PROJECT_ID",
-        ),
+        extra_env_vars=("VERTEX_CREDENTIALS_PATH", "GOOGLE_APPLICATION_CREDENTIALS"),
+        base_url_env_var="VERTEX_BASE_URL",
     ),
     "lmstudio": HermesOverlay(
         transport="openai_chat",
@@ -336,9 +321,10 @@ ALIASES: Dict[str, str] = {
     "gemini-cli": "google-gemini-cli",
     "gemini-oauth": "google-gemini-cli",
 
-    # google vertex (Gemini). NB: "vertex-ai" is intentionally NOT aliased here —
-    # it is a distinct provider id for Claude-on-Vertex (anthropic_messages).
+    # google-vertex
+    "vertex-ai": "vertex",
     "google-vertex": "vertex",
+
 
     # huggingface
     "hf": "huggingface",
