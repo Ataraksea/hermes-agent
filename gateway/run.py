@@ -11669,7 +11669,7 @@ class GatewayRunner:
         # Parse optional turn count: "/undo" → 1, "/undo 3" → 3.
         n = 1
         raw_args = event.get_command_args().strip()
-if raw_args:
+        if raw_args:
             try:
                 n = int(raw_args.split()[0])
             except (ValueError, IndexError):
@@ -11677,7 +11677,7 @@ if raw_args:
             if n < 1:
                 n = 1
 
-session_entry = self.session_store.get_or_create_session(source)
+        session_entry = self.session_store.get_or_create_session(source)
         result = self.session_store.rewind_session(session_entry.session_id, n)
 
         if result is None:
