@@ -514,7 +514,7 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
                 return None
 
     config = load_config()
-    
+
     # First check providers: dict (new-style user-defined providers)
     providers = config.get("providers")
     if isinstance(providers, dict):
@@ -667,22 +667,27 @@ def _resolve_named_custom_runtime(
         if pool_result:
             pool_result["source"] = "direct-alias"
             return pool_result
-        _da_is_openai_url   = base_url_host_matches(base_url, "openai.com") or base_url_host_matches(base_url, "openai.azure.com")
-        _da_is_openrouter   = base_url_host_matches(base_url, "openrouter.ai")
+        _da_is_openai_url = base_url_host_matches(base_url, "openai.com") or base_url_host_matches(
+            base_url, "openai.azure.com"
+        )
+        _da_is_openrouter = base_url_host_matches(base_url, "openrouter.ai")
         api_key_candidates = [
             (explicit_api_key or "").strip(),
             # Gate env key fallbacks on authoritative hosts (#28660)
-            (os.getenv("OPENAI_API_KEY", "").strip()     if _da_is_openai_url else ""),
-            (os.getenv("OPENROUTER_API_KEY", "").strip() if _da_is_openrouter  else ""),
+            (os.getenv("OPENAI_API_KEY", "").strip() if _da_is_openai_url else ""),
+            (os.getenv("OPENROUTER_API_KEY", "").strip() if _da_is_openrouter else ""),
             # Bonus (#28660): derive `<VENDOR>_API_KEY` from the host so users
             # who set DEEPSEEK_API_KEY / GROQ_API_KEY / MISTRAL_API_KEY get the
             # intuitive match without configuring `custom_providers` first.
             _host_derived_api_key(base_url),
         ]
-        api_key = next(
-            (c for c in api_key_candidates if has_usable_secret(c)),
-            "",
-        ) or "no-key-required"
+        api_key = (
+            next(
+                (c for c in api_key_candidates if has_usable_secret(c)),
+                "",
+            )
+            or "no-key-required"
+        )
         return {
             "provider": "custom",
             "api_mode": _detect_api_mode_for_url(base_url) or "chat_completions",
@@ -696,15 +701,14 @@ def _resolve_named_custom_runtime(
     if not custom_provider:
         return None
 
-    base_url = (
-        (explicit_base_url or "").strip()
-        or custom_provider.get("base_url", "")
-    ).rstrip("/")
+    base_url = ((explicit_base_url or "").strip() or custom_provider.get("base_url", "")).rstrip("/")
     if not base_url:
         return None
 
     # Check if a credential pool exists for this custom endpoint
-    pool_result = _try_resolve_from_custom_pool(base_url, "custom", custom_provider.get("api_mode"), provider_name=custom_provider.get("name"))
+    pool_result = _try_resolve_from_custom_pool(
+        base_url, "custom", custom_provider.get("api_mode"), provider_name=custom_provider.get("name")
+    )
     if pool_result:
         # Propagate the model name even when using pooled credentials —
         # the pool doesn't know about the custom_providers model field.
@@ -719,16 +723,18 @@ def _resolve_named_custom_runtime(
             }
         return pool_result
 
-    _cp_is_openai_url   = base_url_host_matches(base_url, "openai.com") or base_url_host_matches(base_url, "openai.azure.com")
-    _cp_is_openrouter   = base_url_host_matches(base_url, "openrouter.ai")
+    _cp_is_openai_url = base_url_host_matches(base_url, "openai.com") or base_url_host_matches(
+        base_url, "openai.azure.com"
+    )
+    _cp_is_openrouter = base_url_host_matches(base_url, "openrouter.ai")
     api_key_candidates = [
         (explicit_api_key or "").strip(),
         str(custom_provider.get("api_key", "") or "").strip(),
         os.getenv(str(custom_provider.get("key_env", "") or "").strip(), "").strip(),
         # Gate provider env keys on their authoritative hosts — sending
         # OPENAI_API_KEY to a local-llm endpoint leaks credentials (#28660).
-        (os.getenv("OPENAI_API_KEY", "").strip()     if _cp_is_openai_url  else ""),
-        (os.getenv("OPENROUTER_API_KEY", "").strip() if _cp_is_openrouter  else ""),
+        (os.getenv("OPENAI_API_KEY", "").strip() if _cp_is_openai_url else ""),
+        (os.getenv("OPENROUTER_API_KEY", "").strip() if _cp_is_openrouter else ""),
         # Bonus (#28660): derive `<VENDOR>_API_KEY` from the host as a final
         # fallback when key_env wasn't set explicitly.
         _host_derived_api_key(base_url),
@@ -737,9 +743,7 @@ def _resolve_named_custom_runtime(
 
     result = {
         "provider": "custom",
-        "api_mode": custom_provider.get("api_mode")
-        or _detect_api_mode_for_url(base_url)
-        or "chat_completions",
+        "api_mode": custom_provider.get("api_mode") or _detect_api_mode_for_url(base_url) or "chat_completions",
         "base_url": base_url,
         "api_key": api_key or "no-key-required",
         "source": f"custom_provider:{custom_provider.get('name', requested_provider)}",
@@ -796,9 +800,7 @@ def _resolve_openrouter_runtime(
         if requested_norm == "auto":
             if not cfg_provider or cfg_provider == "auto":
                 use_config_base_url = True
-        elif requested_norm == "custom" and _config_base_url_trustworthy_for_bare_custom(
-            cfg_base_url, cfg_provider
-        ):
+        elif requested_norm == "custom" and _config_base_url_trustworthy_for_bare_custom(cfg_base_url, cfg_provider):
             use_config_base_url = True
 
     base_url = (
@@ -837,9 +839,9 @@ def _resolve_openrouter_runtime(
         # "ollama.com" (e.g. http://127.0.0.1/ollama.com/v1) or whose
         # hostname is a look-alike (ollama.com.attacker.test) must not
         # receive the Ollama credential. See GHSA-76xc-57q6-vm5m.
-        _is_ollama_url    = base_url_host_matches(base_url, "ollama.com")
-        _is_openai_url    = base_url_host_matches(base_url, "openai.com")
-        _is_openai_azure  = base_url_host_matches(base_url, "openai.azure.com")
+        _is_ollama_url = base_url_host_matches(base_url, "ollama.com")
+        _is_openai_url = base_url_host_matches(base_url, "openai.com")
+        _is_openai_azure = base_url_host_matches(base_url, "openai.azure.com")
         # Gate each provider key on its own host — sending OPENAI_API_KEY or
         # OPENROUTER_API_KEY to an unrelated custom endpoint (DeepSeek, Groq,
         # Mistral, …) leaks credentials and causes 401s (issue #28660).
@@ -847,9 +849,9 @@ def _resolve_openrouter_runtime(
         api_key_candidates = [
             explicit_api_key,
             (cfg_api_key if use_config_base_url else ""),
-            (os.getenv("OLLAMA_API_KEY")     if _is_ollama_url                       else ""),
-            (os.getenv("OPENAI_API_KEY")     if (_is_openai_url or _is_openai_azure) else ""),
-            (os.getenv("OPENROUTER_API_KEY") if _is_openrouter_url                   else ""),
+            (os.getenv("OLLAMA_API_KEY") if _is_ollama_url else ""),
+            (os.getenv("OPENAI_API_KEY") if (_is_openai_url or _is_openai_azure) else ""),
+            (os.getenv("OPENROUTER_API_KEY") if _is_openrouter_url else ""),
             # Bonus (#28660): derive `<VENDOR>_API_KEY` from the host so users
             # who set DEEPSEEK_API_KEY / GROQ_API_KEY / MISTRAL_API_KEY get the
             # intuitive match. Helper returns "" for IPs/loopback and for env
@@ -874,7 +876,9 @@ def _resolve_openrouter_runtime(
         # Pass requested_provider so pool lookup prefers name match over base_url,
         # fixing credential mix-ups when multiple custom providers share a base_url.
         pool_result = _try_resolve_from_custom_pool(
-            base_url, effective_provider, _parse_api_mode(model_cfg.get("api_mode")),
+            base_url,
+            effective_provider,
+            _parse_api_mode(model_cfg.get("api_mode")),
             provider_name=requested_provider if requested_norm != "custom" else None,
         )
         if pool_result:
@@ -1000,10 +1004,7 @@ def _resolve_azure_foundry_runtime(
                     f"(import failed: {exc})"
                 ) from exc
 
-            scope = (
-                str(cfg_entra.get("scope") or "").strip()
-                or SCOPE_AI_AZURE_DEFAULT
-            )
+            scope = str(cfg_entra.get("scope") or "").strip() or SCOPE_AI_AZURE_DEFAULT
             try:
                 entra_config = EntraIdentityConfig(
                     scope=scope,
@@ -1037,6 +1038,7 @@ def _resolve_azure_foundry_runtime(
     if not api_key:
         try:
             from hermes_cli.config import get_env_value
+
             api_key = get_env_value("AZURE_FOUNDRY_API_KEY") or ""
         except Exception:
             api_key = ""
@@ -1305,31 +1307,6 @@ def resolve_runtime_provider(
     )
     if explicit_runtime:
         return explicit_runtime
-
-    # Google Vertex AI — resolved via service account + dynamic token.
-    # This handles the normal config-driven flow (provider: vertex in config.yaml).
-    # _resolve_explicit_runtime above handles the rare case where --api-key or
-    # --base-url CLI flags are passed explicitly.
-    # Must short-circuit before credential pool / api_key fallbacks, which
-    # would otherwise treat GOOGLE_APPLICATION_CREDENTIALS (a file path)
-    # as a static API key and point at the partial inference_base_url.
-    if provider == "vertex":
-        from agent.vertex_adapter import get_vertex_config
-        token, base_url = get_vertex_config()
-        if not token or not base_url:
-            raise AuthError(
-                "Vertex AI credentials not resolvable. Set "
-                "GOOGLE_APPLICATION_CREDENTIALS to a service account JSON path, "
-                "or run `gcloud auth application-default login`."
-            )
-        return {
-            "provider": "vertex",
-            "api_mode": "chat_completions",
-            "base_url": base_url,
-            "api_key": token,
-            "source": "service-account",
-            "requested_provider": requested_provider,
-        }
 
     should_use_pool = provider != "openrouter"
     if provider == "openrouter":
