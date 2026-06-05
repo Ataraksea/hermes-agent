@@ -10,8 +10,6 @@ import os
 import threading
 from collections import OrderedDict
 from pathlib import Path
-
-from hermes_constants import get_hermes_home, get_skills_dir, is_wsl
 from typing import Optional
 
 from agent.runtime_cwd import resolve_agent_cwd
@@ -25,6 +23,7 @@ from agent.skill_utils import (
     skill_matches_environment,
     skill_matches_platform,
 )
+from hermes_constants import get_hermes_home, get_skills_dir, is_wsl
 from utils import atomic_json_write
 
 logger = logging.getLogger(__name__)
@@ -778,8 +777,8 @@ def _probe_remote_backend(env_type: str) -> str | None:
     try:
         # Import locally: tools/ imports are heavy and only relevant when a
         # non-local backend is actually configured.
-        from tools.terminal_tool import _get_env_config  # type: ignore
         from tools.environments import get_environment  # type: ignore
+        from tools.terminal_tool import _get_env_config  # type: ignore
     except Exception as e:
         logger.debug("Backend probe unavailable (import failed): %s", e)
         _BACKEND_PROBE_CACHE[cache_key] = ""
@@ -1313,9 +1312,9 @@ def build_skills_system_prompt(
                     continue
                 seen.add(name)
                 if desc:
-                    index_lines.append(f    "- {name}: {desc}")
+                    index_lines.append(f"- {name}: {desc}")
                 else:
-                    index_lines.append(f    "- {name}")
+                    index_lines.append(f"- {name}")
 
         result = (
             "## Skills (mandatory)\n"
