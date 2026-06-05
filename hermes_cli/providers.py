@@ -83,9 +83,12 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
     ),
     "vertex": HermesOverlay(
         transport="openai_chat",
-        auth_type="api_key",
-        extra_env_vars=("VERTEX_CREDENTIALS_PATH", "GOOGLE_APPLICATION_CREDENTIALS"),
-        base_url_env_var="VERTEX_BASE_URL",
+        auth_type="vertex",
+        extra_env_vars=(
+            "VERTEX_CREDENTIALS_PATH",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "VERTEX_PROJECT_ID",
+        ),
     ),
     "lmstudio": HermesOverlay(
         transport="openai_chat",
@@ -320,10 +323,9 @@ ALIASES: Dict[str, str] = {
     "gemini-cli": "google-gemini-cli",
     "gemini-oauth": "google-gemini-cli",
 
-    # google-vertex
+    # google vertex
     "vertex-ai": "vertex",
     "google-vertex": "vertex",
-
 
     # huggingface
     "hf": "huggingface",

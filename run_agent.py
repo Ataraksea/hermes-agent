@@ -4389,7 +4389,7 @@ class AIAgent:
         if (getattr(self, "provider", "") or "").lower() in {
             "alibaba", "minimax", "minimax-cn",
             "opencode-go", "opencode-zen",
-            "zai", "bedrock", "vertex",
+            "zai", "bedrock",
             "xiaomi",
         }:
             return True
@@ -4404,8 +4404,6 @@ class AIAgent:
             # AWS Bedrock runtime endpoints — defense-in-depth when
             # ``provider`` is unset but ``base_url`` still names Bedrock.
             or "bedrock-runtime." in base
-            # Google Vertex AI endpoints — same defense-in-depth.
-            or "aiplatform.googleapis.com" in base
         )
 
     def _is_qwen_portal(self) -> bool:
