@@ -13,6 +13,7 @@ from gateway.session import build_session_key
 from tests.gateway.restart_test_helpers import (
     make_restart_runner,
     make_restart_source,
+    mask_dev_container_sandbox,
 )
 
 
@@ -103,6 +104,7 @@ async def test_restart_command_uses_detached_without_systemd(tmp_path, monkeypat
     """Without systemd, /restart uses the detached subprocess approach."""
     monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
     monkeypatch.delenv("INVOCATION_ID", raising=False)
+    mask_dev_container_sandbox(monkeypatch)
 
     runner, _adapter = make_restart_runner()
     runner.request_restart = MagicMock(return_value=True)

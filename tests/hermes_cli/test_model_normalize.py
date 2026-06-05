@@ -164,6 +164,46 @@ class TestAggregatorProviders:
         assert result == "anthropic/claude-sonnet-4.6"
 
 
+class TestVertexPublisherPrefix:
+    """Vertex AI's OpenAPI endpoint requires a google/ publisher prefix."""
+
+    def test_bare_gemini_name_gets_google_prefix(self):
+        assert normalize_model_for_provider("gemini-2.5-pro", "vertex") == "google/gemini-2.5-pro"
+
+    def test_already_prefixed_passes_through(self):
+        assert normalize_model_for_provider("google/gemini-2.5-pro", "vertex") == "google/gemini-2.5-pro"
+
+    def test_preview_model_gets_prefix(self):
+        assert normalize_model_for_provider("gemini-3.1-pro-preview", "vertex") == "google/gemini-3.1-pro-preview"
+
+    def test_google_vertex_alias_resolves_for_normalization(self):
+        # "google-vertex" is still a Gemini alias → google/ publisher prefix.
+        # ("vertex-ai" is intentionally NOT — see TestVertexAiClaudeNormalization.)
+        assert normalize_model_for_provider("gemini-2.5-flash", "google-vertex") == "google/gemini-2.5-flash"
+
+
+class TestVertexAiClaudeNormalization:
+    """`vertex-ai` is Claude-on-Vertex (AnthropicVertex), not Gemini-on-Vertex.
+
+    It must NOT receive the google/ publisher prefix; it expects bare,
+    hyphenated claude-* ids like the native Anthropic path.
+    """
+
+    @pytest.mark.parametrize("model,expected", [
+        ("claude-sonnet-4.6", "claude-sonnet-4-6"),
+        ("claude-haiku-4-5", "claude-haiku-4-5"),
+        ("anthropic/claude-sonnet-4.6", "claude-sonnet-4-6"),
+        ("vertex-ai/claude-opus-4.5", "claude-opus-4-5"),
+    ])
+    def test_vertex_ai_uses_claude_format(self, model, expected):
+        assert normalize_model_for_provider(model, "vertex-ai") == expected
+
+    def test_vertex_ai_never_gets_google_prefix(self):
+        assert not normalize_model_for_provider(
+            "claude-sonnet-4.6", "vertex-ai"
+        ).startswith("google/")
+
+
 class TestIssue6211NativeProviderPrefixNormalization:
     @pytest.mark.parametrize("model,target_provider,expected", [
         ("zai/glm-5.1", "zai", "glm-5.1"),

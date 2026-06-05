@@ -348,9 +348,9 @@ class TestResolveVisionMainFirst:
         assert captured == {"is_agent_turn": True, "is_vision": False}
         assert "default_headers" not in mock_openai.call_args.kwargs
 
-    def test_main_unavailable_vision_falls_through_to_google_gemini_cli(self):
-        """Main provider fails → fall back to google-gemini-cli vision backend."""
-        gemini_client = MagicMock()
+    def test_main_unavailable_vision_falls_through_to_openrouter(self):
+        """Main provider fails → fall back to openrouter vision backend."""
+        or_client = MagicMock()
 
         with patch(
             "agent.auxiliary_client._read_main_provider", return_value="deepseek",
@@ -359,24 +359,20 @@ class TestResolveVisionMainFirst:
         ), patch(
             "agent.auxiliary_client.resolve_provider_client",
             return_value=(None, None),
-        ) as mock_rpc, patch(
+        ), patch(
             "agent.auxiliary_client._resolve_task_provider_model",
             return_value=("auto", None, None, None, None),
+        ), patch(
+            "agent.auxiliary_client._try_openrouter",
+            return_value=(or_client, "google/gemini-3-flash-preview"),
         ):
-            # resolve_provider_client returns (None, None) for the main
-            # provider ("deepseek") but should return a real client when
-            # called again for "google-gemini-cli" from the strict backend.
-            mock_rpc.side_effect = [
-                (None, None),                      # deepseek main provider
-                (gemini_client, "gemini-2.5-flash"),  # google-gemini-cli strict backend
-            ]
             from agent.auxiliary_client import resolve_vision_provider_client
 
             provider, client, model = resolve_vision_provider_client()
 
-        assert provider == "google-gemini-cli"
-        assert client is gemini_client
-        assert model == "gemini-2.5-flash"
+        assert provider == "openrouter"
+        assert client is or_client
+        assert model == "google/gemini-3-flash-preview"
 
     def test_opencode_go_main_vision_uses_main_provider(self):
         """opencode-go (kimi-k2.6) has vision — main provider should be used directly."""
@@ -392,13 +388,17 @@ class TestResolveVisionMainFirst:
         ), patch(
             "agent.auxiliary_client._resolve_task_provider_model",
             return_value=("auto", None, None, None, None),
+        ), patch(
+            "agent.auxiliary_client._main_model_supports_vision",
+            return_value=True,
         ):
             from agent.auxiliary_client import resolve_vision_provider_client
 
             provider, client, model = resolve_vision_provider_client()
 
-        assert client is fallback_client
-        assert provider in {"openrouter", "nous"}
+        assert client is opencode_client
+        assert provider == "opencode-go"
+        assert model == "kimi-k2.6"
 
     def test_explicit_provider_override_still_wins(self):
         """Explicit config override bypasses main-first policy."""

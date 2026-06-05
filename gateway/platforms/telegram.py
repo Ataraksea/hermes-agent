@@ -3009,14 +3009,13 @@ class TelegramAdapter(BasePlatformAdapter):
         end = min(start + page_size, total)
         page_models = models[start:end]
 
+        labels = self._shorten_model_labels(page_models)
+
         buttons: list = []
-        for i, model_id in enumerate(page_models):
+        for i, label in enumerate(labels):
             abs_idx = start + i
-            short = model_id.split("/")[-1] if "/" in model_id else model_id
-            if len(short) > 38:
-                short = short[:35] + "..."
             buttons.append(
-                InlineKeyboardButton(short, callback_data=f"mm:{abs_idx}")
+                InlineKeyboardButton(label, callback_data=f"mm:{abs_idx}")
             )
 
         rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]

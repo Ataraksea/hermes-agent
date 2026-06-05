@@ -854,6 +854,70 @@ def _read_claude_code_credentials_from_keychain() -> Optional[Dict[str, Any]]:
     return None
 
 
+def build_vertex_client(project: str, region: str = "us-east5"):
+    """Build an AnthropicVertex client using GCP Application Default Credentials.
+
+    Uses the same Messages API as Anthropic direct, but authenticated via
+    GCP IAM (attached service account, ADC, or explicit key file).
+
+    Args:
+        project: GCP project ID (required)
+        region: GCP region where Claude on Vertex AI is generally available
+            (default: us-east5)
+
+    Returns:
+        AnthropicVertex client instance (same interface as Anthropic)
+    """
+    # Best-effort lazy install of anthropic[vertex] (pulls google-auth/google-cloud).
+    # The `vertex-ai` extra is not in [all] per the lazy-install policy, so a user
+    # who installed plain `hermes-agent` and only later selected the vertex-ai
+    # provider still gets the dependency on first use. Mirrors the Gemini path in
+    # agent/vertex_adapter.py; failures fall through to the explicit ImportError.
+    try:
+        from tools.lazy_deps import ensure as _lazy_ensure
+        _lazy_ensure("provider.vertex-ai", prompt=False)
+    except Exception:
+        pass
+
+    try:
+        from anthropic import AnthropicVertex
+    except ImportError:
+        raise ImportError(
+            "anthropic[vertex] is required for the vertex-ai provider. "
+            "Install with: pip install 'hermes-agent[vertex-ai]' "
+            "(or: pip install 'anthropic[vertex]')"
+        )
+
+    from httpx import Timeout
+
+    kwargs = {
+        "project_id": project,
+        "region": region,
+        "timeout": Timeout(timeout=900.0, connect=10.0),
+    }
+
+    return AnthropicVertex(**kwargs)
+
+
+def resolve_vertex_credentials():
+    """Resolve Vertex AI credentials from environment.
+
+    Returns:
+        Tuple of (project_id, region) or (None, None) if not configured.
+    """
+    project = (
+        os.environ.get("VERTEX_PROJECT")
+        or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or os.environ.get("GCP_PROJECT_ID")
+    )
+    region = os.environ.get("VERTEX_REGION", "us-east5")
+
+    if not project:
+        return None, None
+
+    return project, region
+
+
 def read_claude_code_credentials() -> Optional[Dict[str, Any]]:
     """Read refreshable Claude Code OAuth credentials.
 
