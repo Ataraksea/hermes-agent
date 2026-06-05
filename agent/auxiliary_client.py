@@ -100,6 +100,7 @@ class _OpenAIProxy:
 OpenAI = _OpenAIProxy()  # module-level name, resolves lazily on call/isinstance
 
 from agent.credential_pool import load_pool
+from agent.vertex_adapter import get_vertex_config
 from hermes_cli.config import get_hermes_home
 from hermes_constants import OPENROUTER_BASE_URL
 from utils import base_url_host_matches, base_url_hostname, normalize_proxy_env_vars
@@ -2153,6 +2154,14 @@ def _try_vertex_ai() -> Tuple[Optional[Any], Optional[str]]:
     real_client = build_vertex_client(project, region)
     return AnthropicAuxiliaryClient(real_client, model, "", ""), model
 
+
+def _try_vertex() -> Tuple[Optional[OpenAI], Optional[str]]:
+    token, base_url = get_vertex_config()
+    if not token or not base_url:
+        return None, None
+    model = os.environ.get("VERTEX_AUXILIARY_MODEL") or "google/gemini-3-flash-preview"
+    logger.debug("Auxiliary client: Vertex AI (%s)", model)
+    return OpenAI(api_key=token, base_url=base_url), model
 
 _AUTO_PROVIDER_LABELS = {
     "_try_openrouter": "openrouter",

@@ -1306,6 +1306,31 @@ def resolve_runtime_provider(
     if explicit_runtime:
         return explicit_runtime
 
+    # Google Vertex AI — resolved via service account + dynamic token.
+    # This handles the normal config-driven flow (provider: vertex in config.yaml).
+    # _resolve_explicit_runtime above handles the rare case where --api-key or
+    # --base-url CLI flags are passed explicitly.
+    # Must short-circuit before credential pool / api_key fallbacks, which
+    # would otherwise treat GOOGLE_APPLICATION_CREDENTIALS (a file path)
+    # as a static API key and point at the partial inference_base_url.
+    if provider == "vertex":
+        from agent.vertex_adapter import get_vertex_config
+        token, base_url = get_vertex_config()
+        if not token or not base_url:
+            raise AuthError(
+                "Vertex AI credentials not resolvable. Set "
+                "GOOGLE_APPLICATION_CREDENTIALS to a service account JSON path, "
+                "or run `gcloud auth application-default login`."
+            )
+        return {
+            "provider": "vertex",
+            "api_mode": "chat_completions",
+            "base_url": base_url,
+            "api_key": token,
+            "source": "service-account",
+            "requested_provider": requested_provider,
+        }
+
     should_use_pool = provider != "openrouter"
     if provider == "openrouter":
         cfg_provider = str(model_cfg.get("provider") or "").strip().lower()

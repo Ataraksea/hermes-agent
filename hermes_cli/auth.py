@@ -5943,6 +5943,25 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
     }
 
 
+def resolve_vertex_runtime_credentials(
+    credentials_path: Optional[str] = None,
+    region: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Resolve (access_token, base_url) for Vertex AI."""
+    from agent.vertex_adapter import get_vertex_config
+    token, base_url = get_vertex_config(credentials_path, region)
+    if not token or not base_url:
+        raise AuthError(
+            "Vertex AI credentials not found. Set VERTEX_CREDENTIALS_PATH or GOOGLE_APPLICATION_CREDENTIALS.",
+            provider="vertex",
+            code="missing_vertex_creds",
+        )
+    return {
+        "provider": "vertex",
+        "api_key": token,
+        "base_url": base_url,
+        "source": "vertex_adapter",
+    }
 
 # =============================================================================
 # CLI Commands — login / logout

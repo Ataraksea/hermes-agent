@@ -1,207 +1,144 @@
 """Vertex AI (Google Cloud) adapter for Hermes Agent.
 
-Provides credential resolution and OAuth2 token management for Vertex AI's
-OpenAI-compatible endpoint. This allows Hermes to use Gemini models via
-Google Cloud with enterprise-grade rate limits and GCP billing credits.
+Provides authentication and configuration for Vertex AI's OpenAI-compatible
+endpoint. This allows Hermes to use Gemini models via Google Cloud with
+enterprise-grade rate limits and quotas.
 
-Credential resolution priority:
-  1. VERTEX_CREDENTIALS_PATH env var — explicit path to service account JSON
-  2. GOOGLE_APPLICATION_CREDENTIALS env var — standard GCP ADC path
-  3. gcloud ADC (application default credentials) — auto-detected
+Requires: pip install google-auth
 
-Project ID resolution priority:
-  1. VERTEX_PROJECT_ID env var
-  2. GOOGLE_CLOUD_PROJECT env var
-  3. project_id embedded in the service account JSON
-
-Region defaults to "global" (required for Gemini 3.x previews; us-central1
-silently breaks them). Override with VERTEX_REGION.
-
-Architecture follows the same pattern as ``agent/bedrock_adapter.py``:
-  - All Vertex-specific logic isolated here.
-  - Simple detection functions for auth flows (no heavy imports at startup).
-  - OAuth2 token caching with refresh-on-expiry.
-  - Standard OpenAI-compatible chat/completions — no custom SDK or message
-    translation needed.
-
-Requires: ``google-auth`` (optional — only needed when using Vertex provider).
+Environment variables honored (all optional — ADC is used as a fallback):
+  GOOGLE_APPLICATION_CREDENTIALS — path to a service account JSON file.
+  VERTEX_CREDENTIALS_PATH        — alias, takes precedence if set.
+  VERTEX_PROJECT_ID              — override the project_id embedded in creds.
+  VERTEX_REGION                  — override default region ("global" unless set).
 """
 
-import json
 import logging
 import os
 import time
-from typing import Optional
+from typing import Optional, Tuple
+
+# Ensure google-auth is installed before importing. The [vertex] extra is no
+# longer in [all] per the lazy-install policy added 2026-05-12 — lazy_deps
+# handles on-demand installation so the Vertex provider still works for users
+# who installed plain `hermes-agent` and only later selected a Gemini model.
+try:
+    from tools.lazy_deps import ensure as _lazy_ensure
+    _lazy_ensure("provider.vertex", prompt=False)
+except Exception:
+    pass  # lazy_deps unavailable or install failed — fall through to the real ImportError below
+
+try:
+    import google.auth
+    import google.auth.transport.requests
+    from google.oauth2 import service_account
+except ImportError:
+    google = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
-# Cached token with expiry — refreshed lazily by _resolve_vertex_token()
-_token_cache: dict = {}
+DEFAULT_REGION = "global"
+
+_creds_cache: dict = {}
 
 
-# ---------------------------------------------------------------------------
-# Detection functions (fast, no heavy imports, no API calls)
-# ---------------------------------------------------------------------------
-
-
-def _resolve_credentials_path() -> Optional[str]:
-    """Return the path to a service account JSON file, or None."""
+def _resolve_credentials_path(explicit: Optional[str]) -> Optional[str]:
+    if explicit and os.path.exists(explicit):
+        return explicit
     for env_var in ("VERTEX_CREDENTIALS_PATH", "GOOGLE_APPLICATION_CREDENTIALS"):
-        path = os.environ.get(env_var, "").strip()
+        path = os.environ.get(env_var)
         if path and os.path.exists(path):
             return path
     return None
 
 
-def _resolve_project_id_from_sa(path: str) -> Optional[str]:
-    """Read project_id from a service account JSON file."""
-    try:
-        with open(path, "r") as f:
-            sa = json.load(f)
-        return sa.get("project_id")
-    except (OSError, json.JSONDecodeError, KeyError):
-        return None
+def _refresh_credentials(creds) -> None:
+    auth_req = google.auth.transport.requests.Request()
+    creds.refresh(auth_req)
 
 
-def _resolve_project_id() -> Optional[str]:
-    """Resolve the GCP project ID for Vertex AI.
+def get_vertex_credentials(credentials_path: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+    """Return a (fresh access_token, project_id) pair or (None, None) on failure.
 
-    Priority: VERTEX_PROJECT_ID > GOOGLE_CLOUD_PROJECT > SA JSON project_id.
+    Caches the underlying Credentials object and refreshes it when within
+    5 minutes of expiry, so repeated calls don't thrash the token endpoint.
     """
-    for env_var in ("VERTEX_PROJECT_ID", "GOOGLE_CLOUD_PROJECT"):
-        pid = os.environ.get(env_var, "").strip()
-        if pid:
-            return pid
+    if google is None:
+        logger.warning("google-auth package not installed. Cannot use Vertex AI.")
+        return None, None
 
-    creds_path = _resolve_credentials_path()
-    if creds_path:
-        pid = _resolve_project_id_from_sa(creds_path)
-        if pid:
-            return pid
-
-    return None
-
-
-def resolve_vertex_region() -> str:
-    """Return the Vertex AI region, defaulting to 'global'."""
-    return os.environ.get("VERTEX_REGION", "global").strip() or "global"
-
-
-def has_vertex_credentials() -> bool:
-    """Return True if Vertex AI credentials are configured.
-
-    Checks for a service account JSON at a known path or explicit project ID.
-    Does NOT try to load google-auth or make network calls — this is a fast
-    startup check used for provider auto-detection.
-    """
-    if _resolve_credentials_path():
-        return True
-    if _resolve_project_id():
-        return True
-    return False
-
-
-def resolve_vertex_auth_source() -> Optional[str]:
-    """Return a human-readable auth source label, or None."""
-    if os.environ.get("VERTEX_CREDENTIALS_PATH", "").strip():
-        return "VERTEX_CREDENTIALS_PATH"
-    if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip():
-        return "GOOGLE_APPLICATION_CREDENTIALS"
-    if os.environ.get("VERTEX_PROJECT_ID", "").strip():
-        return "VERTEX_PROJECT_ID"
-    if os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip():
-        return "GOOGLE_CLOUD_PROJECT"
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Token management (lazy google-auth import)
-# ---------------------------------------------------------------------------
-
-# Module-level cache for google-auth once imported — allows tests to mock
-# via agent.vertex_adapter._ga_service_account, etc.
-_ga_auth = None
-_ga_transport = None
-_ga_service_account = None
-
-
-def _import_google_auth() -> bool:
-    """Import google-auth modules once. Returns True on success.
-
-    Stores references at module scope so tests can mock them via
-    ``agent.vertex_adapter._ga_service_account`` etc.
-    """
-    global _ga_auth, _ga_transport, _ga_service_account
-    if _ga_auth is not None:
-        return True
-    try:
-        import google.auth as _a
-        import google.auth.transport.requests as _t
-        from google.oauth2 import service_account as _sa
-
-        _ga_auth = _a
-        _ga_transport = _t
-        _ga_service_account = _sa
-        return True
-    except ImportError:
-        logger.warning(
-            "google-auth not installed. Install with: pip install google-auth"
-        )
-        return False
-
-
-def _resolve_vertex_token() -> Optional[str]:
-    """Return a valid OAuth2 access token for Vertex AI.
-
-    Uses service account JSON if available, otherwise falls back to gcloud ADC.
-    Tokens are cached and refreshed only when within 60 seconds of expiry.
-    """
-    now = time.time()
-    if _token_cache and _token_cache.get("expires_at", 0) - now > 60:
-        return _token_cache["token"]
-
-    if not _import_google_auth():
-        return None
-
-    credentials_path = _resolve_credentials_path()
+    resolved_path = _resolve_credentials_path(credentials_path)
+    cache_key = resolved_path or "__adc__"
 
     try:
-        if credentials_path:
-            creds = _ga_service_account.Credentials.from_service_account_file(
-                credentials_path,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
+        cached = _creds_cache.get(cache_key)
+        if cached is None:
+            if resolved_path:
+                creds = service_account.Credentials.from_service_account_file(
+                    resolved_path,
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                )
+                project_id = creds.project_id
+            else:
+                creds, project_id = google.auth.default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+            _creds_cache[cache_key] = (creds, project_id)
         else:
-            creds, _ = _ga_auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            creds, project_id = cached
+
+        needs_refresh = (
+            not getattr(creds, "token", None)
+            or getattr(creds, "expired", False)
+            or (
+                getattr(creds, "expiry", None) is not None
+                and (creds.expiry.timestamp() - time.time()) < 300
             )
+        )
+        if needs_refresh:
+            _refresh_credentials(creds)
 
-        auth_req = _ga_transport.Request()
-        creds.refresh(auth_req)
+        override_project = os.environ.get("VERTEX_PROJECT_ID")
+        if override_project:
+            project_id = override_project
 
-        _token_cache["token"] = creds.token
-        # 55 min buffer (tokens are valid for 60 min)
-        _token_cache["expires_at"] = now + 3300
-        return creds.token
-
+        return creds.token, project_id
     except Exception as e:
-        logger.warning("Failed to resolve Vertex AI credentials: %s", e)
-        return None
+        logger.error(f"Failed to resolve Vertex AI credentials: {e}")
+        _creds_cache.pop(cache_key, None)
+
+        # If ADC failed (e.g. expired refresh token), try the SA file
+        # before giving up — it may have been added after initial startup.
+        if cache_key == "__adc__":
+            sa_path = _resolve_credentials_path(credentials_path)
+            if sa_path:
+                logger.info("ADC failed, retrying with service account: %s", sa_path)
+                return get_vertex_credentials(sa_path)
+
+        return None, None
 
 
-def get_vertex_base_url(
-    project_id: Optional[str] = None,
-    region: Optional[str] = None,
-) -> Optional[str]:
-    """Build the Vertex AI OpenAI-compatible base URL.
+def build_vertex_base_url(project_id: str, region: str = DEFAULT_REGION) -> str:
+    """Build the OpenAI-compatible base URL for Vertex AI.
 
-    Returns None if no project ID can be resolved.
+    The `global` location uses a bare `aiplatform.googleapis.com` hostname,
+    while regional locations use `{region}-aiplatform.googleapis.com`.
+    Gemini 3.x preview models are only served via the global endpoint at
+    the time of writing.
     """
-    pid = project_id or _resolve_project_id()
-    if not pid:
-        return None
-    reg = region or resolve_vertex_region()
-    return (
-        f"https://aiplatform.googleapis.com/v1/projects/{pid}"
-        f"/locations/{reg}/endpoints/openapi"
-    )
+    host = "aiplatform.googleapis.com" if region == "global" else f"{region}-aiplatform.googleapis.com"
+    return f"https://{host}/v1beta1/projects/{project_id}/locations/{region}/endpoints/openapi"
+
+
+def get_vertex_config(
+    credentials_path: Optional[str] = None,
+    region: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve (access_token, base_url) for Vertex AI, or (None, None) on failure."""
+    token, project_id = get_vertex_credentials(credentials_path)
+    if not token or not project_id:
+        return None, None
+
+    effective_region = region or os.environ.get("VERTEX_REGION") or DEFAULT_REGION
+    base_url = build_vertex_base_url(project_id, effective_region)
+    return token, base_url
