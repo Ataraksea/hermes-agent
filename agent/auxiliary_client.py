@@ -1092,38 +1092,6 @@ class AsyncAnthropicAuxiliaryClient:
         self._real_client = sync_wrapper._real_client
 
 
-class _AsyncGeminiCloudCodeCompletionsAdapter:
-    def __init__(self, sync_adapter: Any):
-        self._sync = sync_adapter
-
-    async def create(self, **kwargs) -> Any:
-        import asyncio
-        return await asyncio.to_thread(self._sync.create, **kwargs)
-
-
-class _AsyncGeminiCloudCodeChatShim:
-    def __init__(self, adapter: _AsyncGeminiCloudCodeCompletionsAdapter):
-        self.completions = adapter
-
-
-class AsyncGeminiCloudCodeClient:
-    """Async-compatible wrapper for google-gemini-cli Code Assist calls."""
-
-    def __init__(self, sync_client: Any):
-        self._sync_client = sync_client
-        self.chat = _AsyncGeminiCloudCodeChatShim(
-            _AsyncGeminiCloudCodeCompletionsAdapter(sync_client.chat.completions)
-        )
-        self.api_key = sync_client.api_key
-        self.base_url = sync_client.base_url
-        self._real_client = sync_client
-
-    def close(self) -> None:
-        close_fn = getattr(self._sync_client, "close", None)
-        if callable(close_fn):
-            close_fn()
-
-
 def _endpoint_speaks_anthropic_messages(base_url: str) -> bool:
     """True if the endpoint at ``base_url`` speaks the Anthropic Messages
     protocol instead of OpenAI chat.completions.
@@ -1450,8 +1418,6 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
             except ImportError:
                 pass
             return _try_anthropic()
-        if provider_id == "vertex-ai":
-            return _try_vertex_ai()
 
         pool_present, entry = _select_pool_entry(provider_id)
         if pool_present:
@@ -2186,27 +2152,6 @@ def _try_vertex_ai() -> Tuple[Optional[Any], Optional[str]]:
     logger.debug("Auxiliary client: Vertex AI (%s) project=%s region=%s", model, project, region)
     real_client = build_vertex_client(project, region)
     return AnthropicAuxiliaryClient(real_client, model, "", ""), model
-
-
-def _try_google_gemini_cli(model: Optional[str] = None) -> Tuple[Optional[Any], Optional[str]]:
-    """Try to build a google-gemini-cli auxiliary client (OAuth + Code Assist)."""
-    try:
-        from agent.gemini_cloudcode_adapter import GeminiCloudCodeClient
-        from agent.google_oauth import load_credentials
-    except ImportError:
-        return None, None
-
-    creds = load_credentials()
-    project_id = (creds.project_id if creds else "") or ""
-    default_model = model or _API_KEY_PROVIDER_AUX_MODELS.get(
-        "google-gemini-cli", "gemini-3-flash-preview"
-    )
-    if project_id:
-        client = GeminiCloudCodeClient(project_id=project_id)
-    else:
-        client = GeminiCloudCodeClient()
-    logger.debug("Auxiliary client: google-gemini-cli (%s)", default_model)
-    return client, default_model
 
 
 _AUTO_PROVIDER_LABELS = {
@@ -3283,13 +3228,6 @@ def _to_async_client(sync_client, model: str, is_vision: bool = False):
     except ImportError:
         pass
     try:
-        from agent.gemini_cloudcode_adapter import GeminiCloudCodeClient
-
-        if isinstance(sync_client, GeminiCloudCodeClient):
-            return AsyncGeminiCloudCodeClient(sync_client), model
-    except ImportError:
-        pass
-    try:
         from agent.copilot_acp_client import CopilotACPClient
         if isinstance(sync_client, CopilotACPClient):
             return sync_client, model
@@ -3516,19 +3454,6 @@ def resolve_provider_client(
             return None, None
         final_model = _normalize_resolved_model(model or default, provider)
         return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
-                else (client, final_model))
-
-    # ── Google Vertex AI (service account → dynamic token + project URL) ──
-    if provider == "vertex":
-        client, default = _try_vertex()
-        if client is None:
-            logger.warning("resolve_provider_client: vertex requested but "
-                           "Vertex AI credentials not found (set "
-                           "GOOGLE_APPLICATION_CREDENTIALS or run "
-                           "`gcloud auth application-default login`)")
-            return None, None
-        final_model = _normalize_resolved_model(model or default, provider)
-        return (_to_async_client(client, final_model) if async_mode
                 else (client, final_model))
 
     # ── OpenAI Codex (OAuth → Responses API) ─────────────────────────
@@ -3813,14 +3738,6 @@ def resolve_provider_client(
             final_model = _normalize_resolved_model(model or default_model, provider)
             return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode else (client, final_model))
 
-        if provider == "vertex-ai":
-            client, default_model = _try_vertex_ai()
-            if client is None:
-                logger.warning("resolve_provider_client: vertex-ai requested but no GCP credentials found (set VERTEX_PROJECT)")
-                return None, None
-            final_model = model or default_model
-            return (_to_async_client(client, final_model) if async_mode else (client, final_model))
-
         creds = resolve_api_key_provider_credentials(provider)
         api_key = str(creds.get("api_key", "")).strip()
         # Honour an explicit api_key override (e.g. from a fallback_model entry
@@ -3985,52 +3902,6 @@ def resolve_provider_client(
         return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
                 else (client, final_model))
 
-    elif pconfig.auth_type == "gcp_sdk":
-        # Google Vertex AI — standard OpenAI-compatible endpoint with OAuth2
-        # token authentication. Much simpler than Bedrock: no custom SDK or
-        # message translation. We just build an OpenAI client pointed at the
-        # Vertex endpoint with a fresh OAuth2 token.
-        try:
-            from agent.vertex_adapter import (
-                _resolve_vertex_token,
-                get_vertex_base_url,
-                has_vertex_credentials,
-            )
-        except ImportError:
-            logger.warning("resolve_provider_client: vertex requested but "
-                           "google-auth not installed")
-            return None, None
-
-        if not has_vertex_credentials():
-            logger.debug("resolve_provider_client: vertex requested but "
-                         "no GCP credentials found")
-            return None, None
-
-        base_url = get_vertex_base_url()
-        if not base_url:
-            logger.warning("resolve_provider_client: vertex requested but "
-                           "could not determine project ID")
-            return None, None
-
-        token = _resolve_vertex_token()
-        if not token:
-            logger.warning("resolve_provider_client: vertex requested but "
-                           "could not obtain OAuth2 token")
-            return None, None
-
-        default_model = "google/gemini-3-flash-preview"
-        final_model = _normalize_resolved_model(model or default_model, provider)
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=token, base_url=base_url)
-        except Exception as exc:
-            logger.warning("resolve_provider_client: cannot create Vertex "
-                           "client: %s", exc)
-            return None, None
-        logger.debug("resolve_provider_client: vertex (%s)", final_model)
-        return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
-                else (client, final_model))
-
     elif pconfig.auth_type in {"oauth_device_code", "oauth_external"}:
         # OAuth providers — route through their specific try functions
         if provider == "nous":
@@ -4039,17 +3910,6 @@ def resolve_provider_client(
             return resolve_provider_client("openai-codex", model, async_mode)
         if provider == "xai-oauth":
             return resolve_provider_client("xai-oauth", model, async_mode)
-        if provider == "google-gemini-cli":
-            client, default_model = _try_google_gemini_cli(model)
-            if client is None:
-                logger.warning(
-                    "resolve_provider_client: google-gemini-cli requested but "
-                    "no Google OAuth credentials found (run: hermes auth add google-gemini-cli)"
-                )
-                return None, None
-            final_model = _normalize_resolved_model(model or default_model, provider)
-            return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
-                    else (client, final_model))
         # Other OAuth providers not directly supported
         logger.warning("resolve_provider_client: OAuth provider %s not "
                        "directly supported, try 'auto'", provider)
@@ -4585,12 +4445,6 @@ def cleanup_stale_async_clients() -> None:
             client, _default, cached_loop = entry
             if cached_loop is not None and cached_loop.is_closed():
                 _force_close_async_httpx(client)
-                try:
-                    close_fn = getattr(client, "close", None)
-                    if callable(close_fn):
-                        close_fn()
-                except Exception:
-                    pass
                 stale_keys.append(key)
         for key in stale_keys:
             del _client_cache[key]

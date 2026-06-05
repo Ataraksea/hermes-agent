@@ -4,8 +4,7 @@ from unittest.mock import patch
 def test_pip_install_detected_when_no_git_dir(tmp_path):
     """When PROJECT_ROOT has no .git, detect as pip install."""
     with patch("hermes_cli.config.get_managed_system", return_value=None), \
-         patch("hermes_cli.config.get_hermes_home", return_value=tmp_path), \
-         patch("hermes_constants.is_container", return_value=False):
+         patch("hermes_cli.config.get_hermes_home", return_value=tmp_path):
         from hermes_cli.config import detect_install_method
         method = detect_install_method(project_root=tmp_path)
         assert method == "pip"
@@ -15,8 +14,7 @@ def test_git_install_detected_when_git_dir_exists(tmp_path):
     """When PROJECT_ROOT has .git, detect as git install."""
     (tmp_path / ".git").mkdir()
     with patch("hermes_cli.config.get_managed_system", return_value=None), \
-         patch("hermes_cli.config.get_hermes_home", return_value=tmp_path), \
-         patch("hermes_constants.is_container", return_value=True):
+         patch("hermes_cli.config.get_hermes_home", return_value=tmp_path):
         from hermes_cli.config import detect_install_method
         method = detect_install_method(project_root=tmp_path)
         assert method == "git"

@@ -433,19 +433,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "google/gemini-3-pro-preview",
         "google/gemini-3-flash-preview",
     ],
-    # Google Vertex AI — models available via the OpenAI-compatible ChatCompletions API.
-    # Includes GA models (2.0, 2.5) and preview models (3.x) for maximum flexibility.
-    "vertex": [
-        "google/gemini-3.1-flash-lite-preview",
-        "google/gemini-3.1-pro-preview",
-        "google/gemini-3-pro-preview",
-        "google/gemini-3.5-flash",
-        "google/gemini-2.5-pro",
-        "google/gemini-2.5-flash",
-        "google/gemini-2.5-flash-lite",
-        "google/gemini-2.0-flash-001",
-        "google/gemini-2.0-flash-lite-001",
-    ],
     # Alibaba DashScope Coding platform (coding-intl) — default endpoint.
     # Supports Qwen models + third-party providers (GLM, Kimi, MiniMax).
     # Users with classic DashScope keys should override DASHSCOPE_BASE_URL
@@ -1143,10 +1130,6 @@ _PROVIDER_ALIASES = {
     "qwen-portal": "qwen-oauth",
     "gemini-cli": "google-gemini-cli",
     "gemini-oauth": "google-gemini-cli",
-    # "vertex-ai" is intentionally NOT aliased to "vertex": it is a distinct
-    # provider for Claude-on-Vertex (anthropic_messages), whereas "vertex" is
-    # Gemini-on-Vertex (openai_chat). Only "google-vertex" aliases to Gemini.
-    "google-vertex": "vertex",
     "hf": "huggingface",
     "hugging-face": "huggingface",
     "huggingface-hub": "huggingface",
@@ -3453,12 +3436,6 @@ def validate_requested_model(
             requested,
             api_key=api_key,
         ) or requested
-    elif normalized == "vertex" and requested_for_lookup.startswith("google/"):
-        # Vertex's OpenAPI endpoint requires the google/ publisher prefix on
-        # the wire, but our curated catalog is keyed by bare model name.
-        # Strip it before catalog lookup so users don't get a spurious
-        # "model not found" warning at session start.
-        requested_for_lookup = requested_for_lookup[len("google/"):]
 
     if not requested:
         return {

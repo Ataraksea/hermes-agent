@@ -294,7 +294,7 @@ class TestGoogleGeminiCliProfile:
 
     def test_default_aux_model(self):
         p = get_provider_profile("google-gemini-cli")
-        assert p.default_aux_model == "gemini-3-flash-preview"
+        assert p.default_aux_model == "gemini-2.5-flash"
 
 
 class TestBaseProfile:

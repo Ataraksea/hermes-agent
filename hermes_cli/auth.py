@@ -314,13 +314,6 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
         base_url_env_var="ANTHROPIC_BASE_URL",
     ),
-    "vertex-ai": ProviderConfig(
-        id="vertex-ai",
-        name="Google Vertex AI (Claude)",
-        auth_type="api_key",
-        inference_base_url="",
-        api_key_env_vars=("VERTEX_PROJECT",),
-    ),
     "alibaba": ProviderConfig(
         id="alibaba",
         name="Qwen Cloud",
@@ -414,14 +407,6 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("XIAOMI_API_KEY",),
         base_url_env_var="XIAOMI_BASE_URL",
     ),
-    "vertex": ProviderConfig(
-        id="vertex",
-        name="Google Vertex AI",
-        auth_type="vertex",
-        inference_base_url="https://aiplatform.googleapis.com/v1beta1",
-        api_key_env_vars=("VERTEX_CREDENTIALS_PATH", "GOOGLE_APPLICATION_CREDENTIALS"),
-        base_url_env_var="VERTEX_BASE_URL",
-    ),
     "tencent-tokenhub": ProviderConfig(
         id="tencent-tokenhub",
         name="Tencent TokenHub",
@@ -445,14 +430,6 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         inference_base_url="https://bedrock-runtime.us-east-1.amazonaws.com",
         api_key_env_vars=(),
         base_url_env_var="BEDROCK_BASE_URL",
-    ),
-    "vertex": ProviderConfig(
-        id="vertex",
-        name="Google Vertex AI",
-        auth_type="gcp_sdk",
-        inference_base_url="",  # Computed from project_id + region at runtime
-        api_key_env_vars=(),   # OAuth2 token — not a static API key
-        base_url_env_var="VERTEX_BASE_URL",
     ),
     "azure-foundry": ProviderConfig(
         id="azure-foundry",
@@ -1587,7 +1564,7 @@ def resolve_provider(
 
     # Auto-detect API-key providers by checking their env vars
     for pid, pconfig in PROVIDER_REGISTRY.items():
-        if pconfig.auth_type not in ("api_key", "vertex"):
+        if pconfig.auth_type != "api_key":
             continue
         # GitHub tokens are commonly present for repo/tool access but should not
         # hijack inference auto-selection unless the user explicitly chooses
@@ -5758,13 +5735,6 @@ def get_external_process_provider_status(provider_id: str) -> Dict[str, Any]:
         "base_url": base_url,
         "logged_in": bool(resolved_command or base_url.startswith("acp+tcp://")),
     }
-
-
-def get_vertex_auth_status() -> Dict[str, Any]:
-    """Return auth status for Vertex AI."""
-    from agent.vertex_adapter import get_vertex_credentials
-    token, _ = get_vertex_credentials()
-    return {"logged_in": bool(token), "provider": "vertex"}
 
 
 def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
