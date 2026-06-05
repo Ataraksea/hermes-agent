@@ -37,15 +37,16 @@ import copy
 import hashlib
 import json
 import logging
+
 logger = logging.getLogger(__name__)
 import os
 import re
 import sys
 import tempfile
-import time
 import threading
+import time
 import uuid
-from typing import List, Dict, Any, Optional
+
 # NOTE: `from openai import OpenAI` is deliberately NOT at module top — the
 # SDK pulls ~240 ms of imports. We expose `OpenAI` as a thin proxy object
 # that imports the SDK on first call/isinstance check. This preserves:
@@ -60,6 +61,7 @@ from typing import List, Dict, Any, Optional
 # ModuleNotFoundError on broken/partial installs where `fire` isn't present.
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from hermes_constants import get_hermes_home
 
@@ -94,14 +96,12 @@ def _launch_cwd_for_session(source: str) -> Optional[str]:
 # `mock.patch("run_agent.<X>")`, `from run_agent import <X>` in production
 # siblings, or the `_ra().<X>` indirection in agent/system_prompt.py — none
 # of which ruff's in-module usage scan can see.
+from agent.iteration_budget import IterationBudget
 from agent.process_bootstrap import (
     OpenAI,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.OpenAI")
-    _SafeWriter,  # noqa: F401  # re-exported for tests that `from run_agent import _SafeWriter`
     _get_proxy_for_base_url,
+    _SafeWriter,  # noqa: F401  # re-exported for tests that `from run_agent import _SafeWriter`
 )
-from agent.iteration_budget import IterationBudget
-
-
 from hermes_cli.env_loader import load_hermes_dotenv
 from hermes_cli.timeouts import (
     get_provider_request_timeout,
@@ -119,56 +119,64 @@ else:
 
 
 # Import our tool system
-from model_tools import (
-    get_tool_definitions,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.get_tool_definitions")
-    get_toolset_for_tool,
-    handle_function_call,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.handle_function_call")
-    check_toolset_requirements,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.check_toolset_requirements")
+from agent.codex_responses_adapter import (
+    _derive_responses_function_call_id as _codex_derive_responses_function_call_id,
 )
-from tools.terminal_tool import cleanup_vm
-from tools.interrupt import set_interrupt as _set_interrupt
-from tools.browser_tool import cleanup_browser
+from agent.codex_responses_adapter import (
+    _deterministic_call_id as _codex_deterministic_call_id,
+)
+from agent.codex_responses_adapter import (
+    _split_responses_tool_id as _codex_split_responses_tool_id,
+)
+from agent.codex_responses_adapter import (
+    _summarize_user_message_for_log,  # noqa: F401  # re-exported for tests
+)
 
+# Re-exported for tests that monkeypatch these symbols on run_agent.
+from agent.context_compressor import ContextCompressor  # noqa: F401
+from agent.error_classifier import FailoverReason
 
 # Agent internals extracted to agent/ package for modularity
 from agent.memory_manager import sanitize_context
-from agent.error_classifier import FailoverReason
-from agent.redact import redact_sensitive_text
+from agent.message_sanitization import (  # noqa: F401
+    _SURROGATE_RE,
+    _escape_invalid_chars_in_json_strings,
+    _repair_tool_call_arguments,
+    _sanitize_messages_non_ascii,
+    _sanitize_messages_surrogates,
+    _sanitize_structure_non_ascii,
+    _sanitize_structure_surrogates,
+    _sanitize_surrogates,
+    _sanitize_tools_non_ascii,
+    _strip_images_from_messages,
+    _strip_non_ascii,
+)
 from agent.model_metadata import (
     estimate_request_tokens_rough,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.estimate_request_tokens_rough")
     is_local_endpoint,
 )
-from agent.usage_pricing import normalize_usage
-# Re-exported for tests that monkeypatch these symbols on run_agent.
-from agent.context_compressor import ContextCompressor  # noqa: F401
-from agent.retry_utils import jittered_backoff  # noqa: F401
+from agent.process_bootstrap import _get_proxy_from_env  # noqa: F401
 from agent.prompt_builder import (  # noqa: F401  # re-exported via _ra() / mock.patch("run_agent.<name>") / from run_agent import <name>
     DEFAULT_AGENT_IDENTITY,
-    build_skills_system_prompt,
     build_context_files_prompt,
     build_environment_hints,
     build_nous_subscription_prompt,
+    build_skills_system_prompt,
     load_soul_md,
 )
-from agent.process_bootstrap import _get_proxy_from_env  # noqa: F401
-from agent.message_sanitization import (  # noqa: F401
-    _SURROGATE_RE,
-    _sanitize_surrogates,
-    _sanitize_structure_surrogates,
-    _sanitize_messages_surrogates,
-    _escape_invalid_chars_in_json_strings,
-    _repair_tool_call_arguments,
-    _strip_non_ascii,
-    _sanitize_messages_non_ascii,
-    _sanitize_tools_non_ascii,
-    _strip_images_from_messages,
-    _sanitize_structure_non_ascii,
-)
-from agent.codex_responses_adapter import (
-    _derive_responses_function_call_id as _codex_derive_responses_function_call_id,
-    _deterministic_call_id as _codex_deterministic_call_id,
-    _split_responses_tool_id as _codex_split_responses_tool_id,
-    _summarize_user_message_for_log,  # noqa: F401  # re-exported for tests
+from agent.redact import redact_sensitive_text
+from agent.retry_utils import jittered_backoff  # noqa: F401
+from agent.tool_dispatch_helpers import (
+    _append_subdir_hint_to_multimodal,  # noqa: F401  # re-exported for tests that `from run_agent import _append_subdir_hint_to_multimodal`
+    _extract_error_preview,
+    _extract_file_mutation_targets,
+    _extract_parallel_scope_path,  # noqa: F401  # re-exported for tests that `from run_agent import _extract_parallel_scope_path`
+    _is_destructive_command,  # noqa: F401  # re-exported for tests that access `run_agent._is_destructive_command`
+    _is_multimodal_tool_result,
+    _multimodal_text_summary,
+    _paths_overlap,  # noqa: F401  # re-exported for tests that `from run_agent import _paths_overlap`
+    _should_parallelize_tool_batch,
+    _trajectory_normalize_msg,  # noqa: F401  # re-exported for tests that `from run_agent import _trajectory_normalize_msg`
 )
 from agent.tool_guardrails import (
     ToolGuardrailDecision,
@@ -177,27 +185,27 @@ from agent.tool_guardrails import (
 )
 from agent.tool_result_classification import (
     FILE_MUTATING_TOOL_NAMES as _FILE_MUTATING_TOOLS,
+)
+from agent.tool_result_classification import (
     file_mutation_result_landed,
 )
 from agent.trajectory import (
     convert_scratchpad_to_think,
+)
+from agent.trajectory import (
     save_trajectory as _save_trajectory_to_file,
 )
-from agent.tool_dispatch_helpers import (
-    _should_parallelize_tool_batch,
-    _is_destructive_command,  # noqa: F401  # re-exported for tests that access `run_agent._is_destructive_command`
-    _extract_parallel_scope_path,  # noqa: F401  # re-exported for tests that `from run_agent import _extract_parallel_scope_path`
-    _paths_overlap,  # noqa: F401  # re-exported for tests that `from run_agent import _paths_overlap`
-    _is_multimodal_tool_result,
-    _multimodal_text_summary,
-    _append_subdir_hint_to_multimodal,  # noqa: F401  # re-exported for tests that `from run_agent import _append_subdir_hint_to_multimodal`
-    _extract_file_mutation_targets,
-    _extract_error_preview,
-    _trajectory_normalize_msg,  # noqa: F401  # re-exported for tests that `from run_agent import _trajectory_normalize_msg`
+from agent.usage_pricing import normalize_usage
+from model_tools import (
+    check_toolset_requirements,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.check_toolset_requirements")
+    get_tool_definitions,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.get_tool_definitions")
+    get_toolset_for_tool,
+    handle_function_call,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.handle_function_call")
 )
+from tools.browser_tool import cleanup_browser
+from tools.interrupt import set_interrupt as _set_interrupt
+from tools.terminal_tool import cleanup_vm
 from utils import atomic_json_write, base_url_host_matches, base_url_hostname
-
-
 
 _MAX_TOOL_WORKERS = 8
 
@@ -1397,9 +1405,9 @@ class AIAgent:
     # Background memory/skill review — prompts live in agent.background_review
     # ------------------------------------------------------------------
     from agent.background_review import (
+        _COMBINED_REVIEW_PROMPT,
         _MEMORY_REVIEW_PROMPT,
         _SKILL_REVIEW_PROMPT,
-        _COMBINED_REVIEW_PROMPT,
     )
 
     @staticmethod
@@ -3264,8 +3272,9 @@ class AIAgent:
     @staticmethod
     def _build_keepalive_http_client(base_url: str = "") -> Any:
         try:
-            import httpx as _httpx
             import socket as _socket
+
+            import httpx as _httpx
 
             _sock_opts = [(_socket.SOL_SOCKET, _socket.SO_KEEPALIVE, 1)]
             if hasattr(_socket, "TCP_KEEPIDLE"):
@@ -3624,7 +3633,7 @@ class AIAgent:
             return False
 
         try:
-            from agent.anthropic_adapter import resolve_anthropic_token, build_anthropic_client
+            from agent.anthropic_adapter import build_anthropic_client, resolve_anthropic_token
 
             new_token = resolve_anthropic_token()
         except Exception as exc:
@@ -3706,7 +3715,7 @@ class AIAgent:
         runtime_base = getattr(entry, "runtime_base_url", None) or getattr(entry, "base_url", None) or self.base_url
 
         if self.api_mode == "anthropic_messages":
-            from agent.anthropic_adapter import build_anthropic_client, _is_oauth_token
+            from agent.anthropic_adapter import _is_oauth_token, build_anthropic_client
 
             try:
                 self._anthropic_client.close()
@@ -4103,8 +4112,8 @@ class AIAgent:
         misclassified as non-vision and have their images stripped.
         """
         try:
-            from hermes_cli.config import load_config
             from agent.image_routing import _lookup_supports_vision
+            from hermes_cli.config import load_config
             cfg = load_config()
             provider = (getattr(self, "provider", "") or "").strip()
             model = (getattr(self, "model", "") or "").strip()
