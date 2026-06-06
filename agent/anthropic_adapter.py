@@ -758,6 +758,13 @@ def build_anthropic_client(
         if common_betas:
             kwargs["default_headers"] = {"anthropic-beta": ",".join(common_betas)}
 
+
+    _anthropic_workspace_id = os.getenv("ANTHROPIC_WORKSPACE_ID", "").strip()
+    if _anthropic_workspace_id:
+        existing = kwargs.get("default_headers", {})
+        new = {"anthropic-workspace-id": _anthropic_workspace_id}
+        kwargs["default_headers"] = {**existing, **new}
+
     return _anthropic_sdk.Anthropic(**kwargs)
 
 
