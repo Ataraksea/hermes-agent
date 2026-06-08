@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from providers import register_provider
-from providers.base import ProviderProfile
+from providers.base import ProviderProfile, _profile_user_agent
 
 
 def _flat_model_name(model: str | None) -> str:
@@ -113,6 +113,13 @@ opencode_zen = ProviderProfile(
     env_vars=("OPENCODE_ZEN_API_KEY",),
     base_url="https://opencode.ai/zen/v1",
     default_aux_model="gemini-3-flash",
+    # opencode.ai sits behind Cloudflare. The default Python-urllib User-Agent
+    # is blocked with HTTP 403 "error code: 1010" before the request reaches
+    # the inference backend, so catalog probes and chat calls both fail. The
+    # hermes-cli UA is whitelisted by the WAF; the auxiliary client picks it
+    # up automatically from ``default_headers`` when constructing the OpenAI
+    # SDK. Regression for the cron-job 400 spam observed 2026-06-05/06.
+    default_headers={"User-Agent": _profile_user_agent()},
 )
 
 opencode_go = OpenCodeGoProfile(
@@ -120,6 +127,8 @@ opencode_go = OpenCodeGoProfile(
     env_vars=("OPENCODE_GO_API_KEY",),
     base_url="https://opencode.ai/zen/go/v1",
     default_aux_model="glm-5",
+    # Same Cloudflare 1010 workaround as opencode-zen — see comment above.
+    default_headers={"User-Agent": _profile_user_agent()},
 )
 
 register_provider(opencode_zen)

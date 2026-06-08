@@ -146,6 +146,51 @@ class TestOpenCodeGoModelGating:
         assert top_level == {}
 
 
+class TestOpenCodeGoCloudflareHeaders:
+    """OpenCode Go must never use Python's default HTTP fingerprint."""
+
+    def test_profile_declares_user_agent_for_runtime_calls(self, opencode_go_profile):
+        headers = opencode_go_profile.default_headers or {}
+        ua = headers.get("User-Agent", "")
+        assert ua, "opencode-go must set User-Agent to bypass Cloudflare 1010"
+        assert not ua.startswith("Python-urllib"), ua
+        assert not ua.startswith("python-requests"), ua
+        assert len(ua) >= 8
+
+    def test_catalog_fetch_uses_profile_user_agent(self, opencode_go_profile, monkeypatch):
+        """Regression for OCG /models probes returning 403/1010.
+
+        The WAF blocks minimal urllib requests. ``fetch_models`` should always
+        attach a Hermes UA before opening the request.
+        """
+        import json
+        import urllib.request
+
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps({"data": [{"id": "kimi-k2.6"}]}).encode()
+
+        def fake_urlopen(req, timeout=0):
+            captured["user_agent"] = req.get_header("User-agent")
+            return FakeResponse()
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+        models = opencode_go_profile.fetch_models(api_key="test-key")
+
+        assert models == ["kimi-k2.6"]
+        ua = captured.get("user_agent") or ""
+        assert ua.startswith("hermes-cli/"), ua
+
+
 class TestOpenCodeGoFullKwargsIntegration:
     """End-to-end transport kwargs include the profile-provided controls."""
 
