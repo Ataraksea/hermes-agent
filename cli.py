@@ -8638,8 +8638,151 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                 " — all commands auto-approved. Use with caution."
             )
 
+    def _handle_reasoning_command(self, cmd: str):
+        """Handle /reasoning — manage effort level and display toggle.
 
+        Usage:
+            /reasoning              Show current effort level and display state
+            /reasoning <level>      Set reasoning effort (none, minimal, low, medium, high, xhigh, max)
+            /reasoning show|on      Show model thinking/reasoning in output
+            /reasoning hide|off     Hide model thinking/reasoning from output
+        """
+        parts = cmd.strip().split(maxsplit=1)
 
+        if len(parts) < 2:
+            # Show current state
+            rc = self.reasoning_config
+            if rc is None:
+                level = "medium (default)"
+            elif rc.get("enabled") is False:
+                level = "none (disabled)"
+            else:
+                level = rc.get("effort", "medium")
+            display_state = "on ✓" if self.show_reasoning else "off"
+            _cprint(f"  {_ACCENT}Reasoning effort:  {level}{_RST}")
+            _cprint(f"  {_ACCENT}Reasoning display: {display_state}{_RST}")
+            _cprint(f"  {_DIM}Usage: /reasoning <none|minimal|low|medium|high|xhigh|max|show|hide>{_RST}")
+            return
+
+        arg = parts[1].strip().lower()
+
+        # Display toggle
+        if arg in {"show", "on"}:
+            self.show_reasoning = True
+            if self.agent:
+                self.agent.reasoning_callback = self._current_reasoning_callback()
+            save_config_value("display.show_reasoning", True)
+            _cprint(f"  {_ACCENT}✓ Reasoning display: ON (saved){_RST}")
+            _cprint(f"  {_DIM}  Model thinking will be shown during and after each response.{_RST}")
+            return
+        if arg in {"hide", "off"}:
+            self.show_reasoning = False
+            if self.agent:
+                self.agent.reasoning_callback = self._current_reasoning_callback()
+            save_config_value("display.show_reasoning", False)
+            _cprint(f"  {_ACCENT}✓ Reasoning display: OFF (saved){_RST}")
+            return
+
+        # Effort level change
+        parsed = _parse_reasoning_config(arg)
+        if parsed is None:
+            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}{_RST}")
+            _cprint(f"  {_DIM}Valid levels: none, minimal, low, medium, high, xhigh, max{_RST}")
+            _cprint(f"  {_DIM}Display:      show, hide{_RST}")
+            return
+
+        self.reasoning_config = parsed
+        self.agent = None  # Force agent re-init with new reasoning config
+
+        if save_config_value("agent.reasoning_effort", arg):
+            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (saved to config){_RST}")
+        else:
+            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (session only){_RST}")
+
+    def _handle_busy_command(self, cmd: str):
+        """Handle /busy — control what Enter does while Hermes is working.
+
+        Usage:
+            /busy               Show current busy input mode
+            /busy status        Show current busy input mode
+            /busy queue         Queue input for the next turn instead of interrupting
+            /busy steer         Inject Enter mid-run via /steer (after next tool call)
+            /busy interrupt     Interrupt the current run on Enter (default)
+        """
+        parts = cmd.strip().split(maxsplit=1)
+        if len(parts) < 2 or parts[1].strip().lower() == "status":
+            _cprint(f"  {_ACCENT}Busy input mode: {self.busy_input_mode}{_RST}")
+            if self.busy_input_mode == "queue":
+                _behavior = "queues for next turn"
+            elif self.busy_input_mode == "steer":
+                _behavior = "steers into current run (after next tool call)"
+            else:
+                _behavior = "interrupts current run"
+            _cprint(f"  {_DIM}Enter while busy: {_behavior}{_RST}")
+            _cprint(f"  {_DIM}Usage: /busy [queue|steer|interrupt|status]{_RST}")
+            return
+
+        arg = parts[1].strip().lower()
+        if arg not in {"queue", "interrupt", "steer"}:
+            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}{_RST}")
+            _cprint(f"  {_DIM}Usage: /busy [queue|steer|interrupt|status]{_RST}")
+            return
+
+        self.busy_input_mode = arg
+        if save_config_value("display.busy_input_mode", arg):
+            if arg == "queue":
+                behavior = "Enter will queue follow-up input while Hermes is busy."
+            elif arg == "steer":
+                behavior = "Enter will steer your message into the current run (after the next tool call)."
+            else:
+                behavior = "Enter will interrupt the current run while Hermes is busy."
+            _cprint(f"  {_ACCENT}✓ Busy input mode set to '{arg}' (saved to config){_RST}")
+            _cprint(f"  {_DIM}{behavior}{_RST}")
+        else:
+            _cprint(f"  {_ACCENT}✓ Busy input mode set to '{arg}' (session only){_RST}")
+
+    def _handle_fast_command(self, cmd: str):
+        """Handle /fast — toggle fast mode (OpenAI Priority Processing / Anthropic Fast Mode)."""
+        if not self._fast_command_available():
+            _cprint("  (._.) /fast is only available for models that support fast mode (OpenAI Priority Processing or Anthropic Fast Mode).")
+            return
+
+        # Determine the branding for the current model
+        try:
+            from hermes_cli.models import _is_anthropic_fast_model
+            agent = getattr(self, "agent", None)
+            model = getattr(agent, "model", None) or getattr(self, "model", None)
+            feature_name = "Anthropic Fast Mode" if _is_anthropic_fast_model(model) else "Priority Processing"
+        except Exception:
+            feature_name = "Fast mode"
+
+        parts = cmd.strip().split(maxsplit=1)
+        if len(parts) < 2 or parts[1].strip().lower() == "status":
+            status = "fast" if self.service_tier == "priority" else "normal"
+            _cprint(f"  {_ACCENT}{feature_name}: {status}{_RST}")
+            _cprint(f"  {_DIM}Usage: /fast [normal|fast|status]{_RST}")
+            return
+
+        arg = parts[1].strip().lower()
+
+        if arg in {"fast", "on"}:
+            self.service_tier = "priority"
+            saved_value = "fast"
+            label = "FAST"
+        elif arg in {"normal", "off"}:
+            self.service_tier = None
+            saved_value = "normal"
+            label = "NORMAL"
+        else:
+            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}{_RST}")
+            _cprint(f"  {_DIM}Usage: /fast [normal|fast|status]{_RST}")
+            return
+
+        self.agent = None  # Force agent re-init with new service-tier config
+        if save_config_value("agent.service_tier", saved_value):
+            _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (saved to config){_RST}")
+        else:
+            _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (session only){_RST}")
 
     def _on_reasoning(self, reasoning_text: str):
         """Callback for intermediate reasoning display during tool-call loops."""
