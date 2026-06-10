@@ -1,7 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
-
-import type { ExecCommandDispatchResponse } from '@/app/types'
+import { Fragment, type ReactNode, useState } from 'react'
 import { PageLoader } from '@/components/page-loader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -147,7 +145,8 @@ export function KanbanTab({ requestGateway }: KanbanTabProps) {
 
   const query = useQuery({
     queryFn: () => loadKanbanSnapshot(requestGateway),
-    queryKey: KANBAN_QUERY_KEY
+    queryKey: KANBAN_QUERY_KEY,
+    refetchInterval: 30_000
   })
 
   const snapshot = query.data
@@ -185,7 +184,7 @@ export function KanbanTab({ requestGateway }: KanbanTabProps) {
       ) : query.error ? (
         <KanbanEmptyState body={query.error.message} title={r.loadFailed} />
       ) : !snapshot?.currentBoard ? (
-        <KanbanEmptyState body={r.noBoardsBody} title={r.noBoardsTitle} />
+        <KanbanEmptyState body={<InlineCodeText text={r.noBoardsBody} />} title={r.noBoardsTitle} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="px-3 pb-2">
@@ -248,6 +247,7 @@ export function KanbanTab({ requestGateway }: KanbanTabProps) {
 
               <Separator />
 
+              {/* TODO: Keep the MVP read-only until desktop mutation affordances land; task actions still flow through chat/CLI. */}
               {selectedTask ? <KanbanTaskDetails task={selectedTask} /> : null}
             </div>
           )}
@@ -301,7 +301,28 @@ function KanbanTaskDetails({ task }: { task: KanbanTask }) {
   )
 }
 
-function KanbanEmptyState({ body, title }: { body: string; title: string }) {
+function InlineCodeText({ text }: { text: string }) {
+  const parts = text.split(/(`[^`]+`)/g).filter(Boolean)
+
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.startsWith('`') && part.endsWith('`') ? (
+          <code
+            className="mx-px rounded bg-muted/50 px-1 py-px font-mono text-[0.92em] text-muted-foreground/85"
+            key={`code-${index}`}
+          >
+            {part.slice(1, -1)}
+          </code>
+        ) : (
+          <Fragment key={`text-${index}`}>{part}</Fragment>
+        )
+      )}
+    </>
+  )
+}
+
+function KanbanEmptyState({ body, title }: { body: ReactNode; title: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 text-center">
       <div className="text-[0.7rem] font-semibold uppercase tracking-[0.07em] text-muted-foreground/75">{title}</div>

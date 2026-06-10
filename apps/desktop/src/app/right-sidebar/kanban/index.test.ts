@@ -1,6 +1,38 @@
-import { describe, expect, it, vi } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { createElement } from 'react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { loadKanbanSnapshot } from './index'
+import { I18nProvider } from '@/i18n'
+
+import { KanbanTab, loadKanbanSnapshot } from './index'
+
+afterEach(() => {
+  cleanup()
+})
+
+function renderKanbanTab(requestGateway: <T>(method: string, params?: Record<string, unknown>) => Promise<T>) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false
+      }
+    }
+  })
+
+  return render(
+    createElement(
+      QueryClientProvider,
+      {
+        client: queryClient,
+        children: createElement(I18nProvider, {
+          configClient: null,
+          children: createElement(KanbanTab, { requestGateway })
+        })
+      }
+    )
+  )
+}
 
 describe('loadKanbanSnapshot', () => {
   it('loads boards and tasks from cli.exec JSON output', async () => {
@@ -90,5 +122,41 @@ describe('loadKanbanSnapshot', () => {
       requestGatewayMock(method, params) as Promise<T>)
 
     await expect(loadKanbanSnapshot(requestGateway)).rejects.toThrow('kanban: database missing')
+  })
+})
+
+describe('KanbanTab', () => {
+  it('renders the empty-board command as inline code', async () => {
+    const requestGatewayMock = vi.fn(async (_method: string, params?: Record<string, unknown>) => {
+      const argv = params?.argv
+
+      if (Array.isArray(argv) && argv.join(' ') === 'kanban boards list --json') {
+        return {
+          blocked: false,
+          code: 0,
+          output: '[]'
+        }
+      }
+
+      if (Array.isArray(argv) && argv.join(' ') === 'kanban list --json') {
+        return {
+          blocked: false,
+          code: 0,
+          output: '[]'
+        }
+      }
+
+      throw new Error(`unexpected argv: ${JSON.stringify(argv)}`)
+    })
+    const requestGateway = (<T>(method: string, params?: Record<string, unknown>) =>
+      requestGatewayMock(method, params) as Promise<T>)
+
+    const { container } = renderKanbanTab(requestGateway)
+
+    await screen.findByText('No boards')
+
+    const code = await waitFor(() => container.querySelector('code'))
+    expect(code?.textContent).toBe('hermes kanban boards create <slug>')
+    expect(container.textContent).toContain('Create a board with hermes kanban boards create <slug> to see it here.')
   })
 })

@@ -1749,7 +1749,7 @@ export const zh: Translations = {
       workflow: '工作流',
       notSet: '未设置',
       unknownStatus: '未知',
-      statusCount: (status: string, count: number) => `${status} ${count}`
+      statusCount: (status: string, count: number) => `${count} ${status}`
     }
   },
 

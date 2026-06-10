@@ -1569,7 +1569,7 @@ export const en: Translations = {
       workflow: 'Workflow',
       notSet: 'Not set',
       unknownStatus: 'unknown',
-      statusCount: (status: string, count: number) => `${status} ${count}`
+      statusCount: (status: string, count: number) => `${count} ${status}`
     }
   },
 
