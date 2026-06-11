@@ -137,6 +137,10 @@ from agent.codex_responses_adapter import (
 from agent.context_compressor import ContextCompressor  # noqa: F401
 from agent.error_classifier import FailoverReason
 
+from tools.terminal_tool import cleanup_vm
+from tools.interrupt import set_interrupt as _set_interrupt
+from tools.browser_tool import cleanup_browser
+
 # Agent internals extracted to agent/ package for modularity
 from agent.memory_manager import sanitize_context
 from agent.message_sanitization import (  # noqa: F401
@@ -203,11 +207,7 @@ from model_tools import (
     get_toolset_for_tool,
     handle_function_call,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.handle_function_call")
 )
-from tools.browser_tool import cleanup_browser
-from tools.interrupt import set_interrupt as _set_interrupt
-from tools.terminal_tool import cleanup_vm
-from utils import atomic_json_write, base_url_host_matches, base_url_hostname, is_truthy_value
-from utils import atomic_json_write, base_url_host_matches, base_url_hostname, is_truthy_value
+from utils import atomic_json_write, base_url_host_matches, base_url_hostname, is_truthy_value, model_forces_max_completion_tokens
 
 
 
@@ -423,6 +423,7 @@ class AIAgent:
         thinking_callback: callable = None,
         reasoning_callback: callable = None,
         clarify_callback: callable = None,
+        read_terminal_callback: callable = None,
         step_callback: callable = None,
         stream_delta_callback: callable = None,
         interim_assistant_callback: callable = None,
@@ -496,6 +497,7 @@ class AIAgent:
             thinking_callback=thinking_callback,
             reasoning_callback=reasoning_callback,
             clarify_callback=clarify_callback,
+            read_terminal_callback=read_terminal_callback,
             step_callback=step_callback,
             stream_delta_callback=stream_delta_callback,
             interim_assistant_callback=interim_assistant_callback,
@@ -1298,13 +1300,24 @@ class AIAgent:
     def _max_tokens_param(self, value: int) -> dict:
         """Return the correct max tokens kwarg for the current provider.
 
-        OpenAI's newer models (gpt-4o, o-series, gpt-5+) require
-        'max_completion_tokens'. Azure OpenAI also requires
-        'max_completion_tokens' for gpt-5.x models served via the
-        OpenAI-compatible endpoint. OpenRouter, local models, and older
+        OpenAI's newer models (gpt-4o, gpt-4.1, gpt-5+, o-series) require
+        'max_completion_tokens'. Azure OpenAI and GitHub Copilot also require
+        'max_completion_tokens' for those families served via their
+        OpenAI-compatible endpoints. OpenRouter, local models, and older
         OpenAI models use 'max_tokens'.
+
+        The check is URL-first (api.openai.com / Azure / Copilot all use the
+        new kwarg), then falls back to a model-name check so third-party
+        OpenAI-compatible endpoints fronting those models are recognised —
+        URL-only detection misses that case and silently sends the wrong
+        kwarg, which the upstream model rejects with a 400.
         """
-        if self._is_direct_openai_url() or self._is_azure_openai_url() or self._is_github_copilot_url():
+        if (
+            self._is_direct_openai_url()
+            or self._is_azure_openai_url()
+            or self._is_github_copilot_url()
+            or model_forces_max_completion_tokens(self.model)
+        ):
             return {"max_completion_tokens": value}
         return {"max_tokens": value}
 
@@ -2865,11 +2878,18 @@ class AIAgent:
         if state is None:
             return
         try:
-            from agent.credits_tracker import evaluate_credits_notices
+            from agent.credits_tracker import evaluate_credits_notices, is_free_tier_model
             latch = getattr(self, "_credits_latch", None)
             if latch is None:
                 latch = self._credits_latch = {"active": set(), "seen_below_90": False, "usage_band": None}
-            to_show, to_clear = evaluate_credits_notices(state, latch)
+            # Free-model gate: a depleted account on a free model can still
+            # inference, so the depleted error banner is suppressed. Local-data
+            # only (":free" suffix + pricing-cache peek) — never a network call.
+            model_is_free = is_free_tier_model(
+                getattr(self, "model", "") or "",
+                getattr(self, "base_url", "") or "",
+            )
+            to_show, to_clear = evaluate_credits_notices(state, latch, model_is_free=model_is_free)
             for key in to_clear:        # clears FIRST …
                 self._emit_notice_clear(key)
             for notice in to_show:      # … then shows (depleted lands last in a latest-wins slot)
