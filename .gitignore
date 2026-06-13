@@ -142,4 +142,10 @@ scripts/out/
 # committed to the repo root. See the hermes-release skill.
 RELEASE_v*.md
 
+<<<<<<< HEAD
 .virtualcontext/store.db
+=======
+# Desktop demo-run scratch output (hermes writes demo/*.txt during recorded
+# walkthroughs). Throwaway artifacts, never part of the app.
+apps/desktop/demo/
+>>>>>>> 7d183f64979ffd91d52175d03c695d1ecad752d1
