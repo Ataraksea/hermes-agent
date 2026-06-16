@@ -6546,6 +6546,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         self._handle_resume_command(f"/resume {index}")
         return True
 
+    def _handle_sessions_command(self, cmd_original: str) -> None:
+        """Handle /sessions [subcommand|id] — list recent sessions or resume one.
 
         Without arguments, prints the same recent-sessions table that /resume
         shows when called without a target, and tells the user how to resume.
