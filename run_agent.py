@@ -46,7 +46,7 @@ import tempfile
 import threading
 import time
 import uuid
-
+from typing import List, Dict, Any, Optional, Callable
 # NOTE: `from openai import OpenAI` is deliberately NOT at module top — the
 # SDK pulls ~240 ms of imports. We expose `OpenAI` as a thin proxy object
 # that imports the SDK on first call/isinstance check. This preserves:
@@ -169,21 +169,6 @@ from agent.prompt_builder import (  # noqa: F401  # re-exported via _ra() / mock
     build_skills_system_prompt,
     load_soul_md,
 )
-<<<<<<< HEAD
-from agent.redact import redact_sensitive_text
-from agent.retry_utils import jittered_backoff  # noqa: F401
-from agent.tool_dispatch_helpers import (
-    _append_subdir_hint_to_multimodal,  # noqa: F401  # re-exported for tests that `from run_agent import _append_subdir_hint_to_multimodal`
-    _extract_error_preview,
-    _extract_file_mutation_targets,
-    _extract_parallel_scope_path,  # noqa: F401  # re-exported for tests that `from run_agent import _extract_parallel_scope_path`
-    _is_destructive_command,  # noqa: F401  # re-exported for tests that access `run_agent._is_destructive_command`
-    _is_multimodal_tool_result,
-    _multimodal_text_summary,
-    _paths_overlap,  # noqa: F401  # re-exported for tests that `from run_agent import _paths_overlap`
-    _should_parallelize_tool_batch,
-    _trajectory_normalize_msg,  # noqa: F401  # re-exported for tests that `from run_agent import _trajectory_normalize_msg`
-=======
 from agent.process_bootstrap import _get_proxy_from_env  # noqa: F401
 from agent.message_sanitization import (  # noqa: F401
     _SURROGATE_RE,
@@ -203,7 +188,6 @@ from agent.codex_responses_adapter import (
     _deterministic_call_id as _codex_deterministic_call_id,
     _split_responses_tool_id as _codex_split_responses_tool_id,
     _summarize_user_message_for_log,  # also used by _sync_external_memory_for_turn (memory boundary)
->>>>>>> 7d183f64979ffd91d52175d03c695d1ecad752d1
 )
 from agent.tool_guardrails import (
     ToolGuardrailDecision,
@@ -453,6 +437,7 @@ class AIAgent:
         status_callback: callable = None,
         notice_callback: callable = None,
         notice_clear_callback: callable = None,
+        event_callback: Optional[Callable[[str, dict], None]] = None,
         max_tokens: int = None,
         reasoning_config: Dict[str, Any] = None,
         service_tier: str = None,
@@ -527,6 +512,7 @@ class AIAgent:
             status_callback=status_callback,
             notice_callback=notice_callback,
             notice_clear_callback=notice_clear_callback,
+            event_callback=event_callback,
             max_tokens=max_tokens,
             reasoning_config=reasoning_config,
             service_tier=service_tier,
@@ -1539,16 +1525,29 @@ class AIAgent:
         that synthetic text leak into persisted transcripts or resumed session
         history. When an override is configured for the active turn, mutate the
         in-memory messages list in place so both persistence and returned
-        history stay clean.
+        history stay clean.  A paired timestamp override preserves the platform
+        event time as message metadata, rather than embedding it in content.
         """
         idx = getattr(self, "_persist_user_message_idx", None)
         override = getattr(self, "_persist_user_message_override", None)
-        if override is None or idx is None:
+        timestamp = getattr(self, "_persist_user_message_timestamp", None)
+        if idx is None or (override is None and timestamp is None):
             return
         if 0 <= idx < len(messages):
             msg = messages[idx]
             if isinstance(msg, dict) and msg.get("role") == "user":
-                msg["content"] = override
+                # Text-only call paths may pass a synthetic API-facing prompt
+                # and a cleaner transcript string separately. Multimodal
+                # turns, however, keep image/audio blocks in the live
+                # messages list that is still used for the API request after
+                # early crash-resilience persistence. Do not replace those
+                # blocks with the text-only persistence override before the
+                # model call is built. The paired timestamp override still
+                # applies — it is metadata, not content.
+                if override is not None and not isinstance(msg.get("content"), list):
+                    msg["content"] = override
+                if timestamp is not None:
+                    msg["timestamp"] = timestamp
 
     def _persist_session(self, messages: List[Dict], conversation_history: List[Dict] = None):
         """Save session state to both JSON log and SQLite on any exit path.
@@ -1706,6 +1705,7 @@ class AIAgent:
                     reasoning_details=msg.get("reasoning_details") if role == "assistant" else None,
                     codex_reasoning_items=msg.get("codex_reasoning_items") if role == "assistant" else None,
                     codex_message_items=msg.get("codex_message_items") if role == "assistant" else None,
+                    timestamp=msg.get("timestamp"),
                 )
                 flushed_ids.add(msg_id)
             self._last_flushed_db_idx = len(messages)
@@ -3139,18 +3139,11 @@ class AIAgent:
                 response_text,
                 **sync_kwargs,
             )
-<<<<<<< HEAD
             if not self._memory_sync_recall:
                 self._memory_manager.queue_prefetch_all(
-                    original_user_message,
-                        session_id=self.session_id or "",
+                    user_text,
+                    session_id=self.session_id or "",
                 )
-=======
-            self._memory_manager.queue_prefetch_all(
-                user_text,
-                session_id=self.session_id or "",
-            )
->>>>>>> 7d183f64979ffd91d52175d03c695d1ecad752d1
         except Exception:
             pass
 
@@ -5294,10 +5287,20 @@ class AIAgent:
         task_id: str = None,
         stream_callback: Optional[callable] = None,
         persist_user_message: Optional[str] = None,
+        persist_user_timestamp: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Forwarder — see ``agent.conversation_loop.run_conversation``."""
         from agent.conversation_loop import run_conversation
-        return run_conversation(self, user_message, system_message, conversation_history, task_id, stream_callback, persist_user_message)
+        return run_conversation(
+            self,
+            user_message,
+            system_message,
+            conversation_history,
+            task_id,
+            stream_callback,
+            persist_user_message,
+            persist_user_timestamp,
+        )
 
     def chat(self, message: str, stream_callback: Optional[callable] = None) -> str:
         """
