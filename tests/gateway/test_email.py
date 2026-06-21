@@ -1094,7 +1094,10 @@ class TestSendEmailStandalone(unittest.TestCase):
         """_send_email should use implicit TLS for SMTPS port 465."""
         import asyncio
         import ssl
-        from tools.send_message_tool import _send_email
+        from plugins.platforms.email.adapter import _standalone_send as _email_send
+        from types import SimpleNamespace
+        async def _send_email(extra, chat_id, message):
+            return await _email_send(SimpleNamespace(token=None, api_key=None, extra=extra or {}), chat_id, message)
 
         with patch("smtplib.SMTP") as mock_starttls_smtp, \
              patch("smtplib.SMTP_SSL") as mock_smtp_ssl:

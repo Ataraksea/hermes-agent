@@ -703,25 +703,9 @@ class EmailAdapter(BasePlatformAdapter):
             smtp.send_message(msg)
         finally:
             try:
-                smtp.login(self._address, self._password)
-                smtp.send_message(msg)
-            finally:
-                try:
-                    smtp.quit()
-                except Exception:
-                    smtp.close()
-        else:
-            # Port 587 and similar use STARTTLS after connecting in plaintext.
-            smtp = smtplib.SMTP(self._smtp_host, self._smtp_port, timeout=30)
-            try:
-                smtp.starttls(context=context)
-                smtp.login(self._address, self._password)
-                smtp.send_message(msg)
-            finally:
-                try:
-                    smtp.quit()
-                except Exception:
-                    smtp.close()
+                smtp.quit()
+            except Exception:
+                smtp.close()
 
         logger.info("[Email] Sent reply to %s (subject: %s)", to_addr, subject)
         return msg_id
