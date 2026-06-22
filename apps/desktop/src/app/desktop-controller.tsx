@@ -1109,6 +1109,7 @@ export function DesktopController() {
         onActivateFile={path => composer.insertContextPathInlineRef(path)}
         onActivateFolder={path => composer.insertContextPathInlineRef(path, true)}
         onChangeCwd={changeSessionCwd}
+        requestGateway={requestGateway}
       />
     </Pane>
   )

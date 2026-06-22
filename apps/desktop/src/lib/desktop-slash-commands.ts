@@ -127,6 +127,7 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
   { name: '/compress', description: 'Compress this conversation context', surface: exec() },
   { name: '/debug', description: 'Create a debug report', surface: exec() },
   { name: '/goal', description: 'Manage the standing goal for this session', surface: exec() },
+  { name: '/kanban', description: 'Use the Kanban board from desktop chat', surface: exec(), args: true },
   { name: '/personality', description: 'Switch personality for this session', surface: exec(), args: true },
   { name: '/queue', description: 'Queue a prompt for the next turn', aliases: ['/q'], surface: exec() },
   { name: '/retry', description: 'Retry the last user message', surface: exec() },
@@ -156,7 +157,7 @@ const NO_DESKTOP_SURFACE: Record<DesktopUnavailableReason, readonly string[]> = 
   ],
   messaging: ['/approve', '/deny'],
   settings: ['/skills'],
-  advanced: ['/curator', '/fast', '/insights', '/kanban', '/reasoning', '/voice']
+  advanced: ['/curator', '/fast', '/insights', '/reasoning', '/voice']
 }
 
 const ALL_SPECS: readonly DesktopCommandSpec[] = [

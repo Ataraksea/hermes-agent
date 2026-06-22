@@ -2,6 +2,7 @@ import type { AppendMessage, ThreadMessage } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
 import { type MutableRefObject, useCallback, useEffect, useRef } from 'react'
 
+import { setRightSidebarTab, setTerminalTakeover } from '@/app/right-sidebar/store'
 import { getProfiles, transcribeAudio } from '@/hermes'
 import { translateNow, type Translations, useI18n } from '@/i18n'
 import { stripAnsi } from '@/lib/ansi'
@@ -39,6 +40,7 @@ import {
 import { resetSessionBackground } from '@/store/composer-status'
 import { clearNotifications, notify, notifyError } from '@/store/notifications'
 import { requestDesktopOnboarding } from '@/store/onboarding'
+import { setFileBrowserOpen } from '@/store/layout'
 import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile, normalizeProfileKey } from '@/store/profile'
 import {
   $busy,
@@ -901,6 +903,13 @@ export function usePromptActions({
       // path that talks to slash.exec / command.dispatch.
       async function runExec(ctx: SlashActionCtx): Promise<void> {
         const { arg, command, name } = ctx
+
+        if (name === 'kanban') {
+          setTerminalTakeover(false)
+          setFileBrowserOpen(true)
+          setRightSidebarTab('kanban')
+        }
+
         const resolved = await withSlashOutput(ctx)
 
         if (!resolved) {
