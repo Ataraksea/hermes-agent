@@ -154,6 +154,22 @@ def _codex_ack_message_response(text: str):
     )
 
 
+def _codex_final_answer_with_top_level_incomplete_response(text: str):
+    return SimpleNamespace(
+        output=[
+            SimpleNamespace(
+                type="message",
+                phase="final_answer",
+                status="completed",
+                content=[SimpleNamespace(type="output_text", text=text)],
+            )
+        ],
+        usage=SimpleNamespace(input_tokens=4, output_tokens=2, total_tokens=6),
+        status="incomplete",
+        model="gpt-5.4",
+    )
+
+
 class _FakeCreateStream:
     """Iterable-only fake for ``responses.create(stream=True)`` outputs.
 
@@ -331,6 +347,39 @@ def test_build_api_kwargs_codex_clamps_minimal_effort(monkeypatch):
     )
 
     assert kwargs["reasoning"]["effort"] == "low"
+
+
+def test_build_api_kwargs_codex_clamps_max_effort(monkeypatch):
+    """'max' reasoning effort is clamped to 'high' on the Responses API.
+
+    'max' is an Anthropic-only effort level. GPT-5.4 / Grok accept up to
+    'xhigh'/'high' on the Responses 'effort' field, so the Codex Responses
+    path must clamp 'max' to 'high' to avoid a 400.
+    """
+    _patch_agent_bootstrap(monkeypatch)
+
+    agent = run_agent.AIAgent(
+        model="gpt-5-codex",
+        base_url="https://chatgpt.com/backend-api/codex",
+        api_key="codex-token",
+        quiet_mode=True,
+        max_iterations=4,
+        skip_context_files=True,
+        skip_memory=True,
+        reasoning_config={"enabled": True, "effort": "max"},
+    )
+    agent._cleanup_task_resources = lambda task_id: None
+    agent._persist_session = lambda messages, history=None: None
+    agent._save_trajectory = lambda messages, user_message, completed: None
+
+    kwargs = agent._build_api_kwargs(
+        [
+            {"role": "system", "content": "You are Hermes."},
+            {"role": "user", "content": "Ping"},
+        ]
+    )
+
+    assert kwargs["reasoning"]["effort"] == "high"
 
 
 def test_build_api_kwargs_codex_preserves_supported_efforts(monkeypatch):
@@ -1379,6 +1428,92 @@ def test_normalize_codex_response_marks_commentary_only_message_as_incomplete(mo
     assert "inspect the repository" in (assistant_message.content or "")
 
 
+def test_normalize_codex_response_final_answer_overrides_top_level_incomplete(monkeypatch):
+    from agent.codex_responses_adapter import _normalize_codex_response
+
+    assistant_message, finish_reason = _normalize_codex_response(
+        _codex_final_answer_with_top_level_incomplete_response(
+            "Briefly:\n\n- I'm Ramsay, your assistant."
+        )
+    )
+
+    assert finish_reason == "stop"
+    assert "Ramsay" in (assistant_message.content or "")
+
+
+def test_normalize_codex_response_top_level_incomplete_without_final_answer_stays_incomplete(monkeypatch):
+    from agent.codex_responses_adapter import _normalize_codex_response
+
+    response = SimpleNamespace(
+        output=[
+            SimpleNamespace(
+                type="message",
+                status="completed",
+                content=[SimpleNamespace(type="output_text", text="Partial...")],
+            )
+        ],
+        usage=SimpleNamespace(input_tokens=4, output_tokens=2, total_tokens=6),
+        status="incomplete",
+        model="gpt-5.4",
+    )
+
+    _, finish_reason = _normalize_codex_response(response)
+
+    assert finish_reason == "incomplete"
+
+
+@pytest.mark.parametrize("top_level_status", ["queued", "in_progress"])
+def test_normalize_codex_response_final_answer_does_not_override_streaming_status(
+    monkeypatch, top_level_status
+):
+    from agent.codex_responses_adapter import _normalize_codex_response
+
+    response = SimpleNamespace(
+        output=[
+            SimpleNamespace(
+                type="message",
+                phase="final_answer",
+                status="completed",
+                content=[SimpleNamespace(type="output_text", text="Interim answer.")],
+            )
+        ],
+        usage=SimpleNamespace(input_tokens=4, output_tokens=2, total_tokens=6),
+        status=top_level_status,
+        model="gpt-5.4",
+    )
+
+    _, finish_reason = _normalize_codex_response(response)
+
+    assert finish_reason == "incomplete"
+
+
+def test_normalize_codex_response_final_answer_does_not_override_per_item_in_progress(monkeypatch):
+    from agent.codex_responses_adapter import _normalize_codex_response
+
+    response = SimpleNamespace(
+        output=[
+            SimpleNamespace(
+                type="message",
+                phase="final_answer",
+                status="completed",
+                content=[SimpleNamespace(type="output_text", text="Partial final.")],
+            ),
+            SimpleNamespace(
+                type="message",
+                status="in_progress",
+                content=[SimpleNamespace(type="output_text", text="")],
+            ),
+        ],
+        usage=SimpleNamespace(input_tokens=4, output_tokens=2, total_tokens=6),
+        status="completed",
+        model="gpt-5.4",
+    )
+
+    _, finish_reason = _normalize_codex_response(response)
+
+    assert finish_reason == "incomplete"
+
+
 def test_normalize_codex_response_preserves_message_status_for_replay(monkeypatch):
     """Incomplete Codex output messages must not be replayed as completed."""
     agent = _build_agent(monkeypatch)
@@ -1837,6 +1972,58 @@ def test_dump_api_request_debug_uses_chat_completions_url(monkeypatch, tmp_path)
 
     payload = json.loads(dump_file.read_text())
     assert payload["request"]["url"] == "http://127.0.0.1:9208/v1/chat/completions"
+
+
+def test_dump_api_request_debug_redacts_request_and_error_secrets(monkeypatch, tmp_path, capsys):
+    """Request debug dumps should redact secrets before disk/stdout output."""
+    import json
+
+    _patch_agent_bootstrap(monkeypatch)
+    monkeypatch.setenv("HERMES_DUMP_REQUEST_STDOUT", "1")
+    agent = run_agent.AIAgent(
+        model="gpt-4o",
+        base_url="http://127.0.0.1:9208/v1",
+        api_key="sk-ant-providersecret1234567890",
+        quiet_mode=True,
+        max_iterations=1,
+        skip_context_files=True,
+        skip_memory=True,
+    )
+    agent.logs_dir = tmp_path
+
+    notion_token = "ntn_abc123def456ghi789jkl"
+    error_secret = "sk-ant-errorsecret1234567890"
+    response_secret = "sk-ant-responsesecret1234567890"
+    response = SimpleNamespace(status_code=400, text=f"provider echoed {response_secret}")
+
+    class ProviderError(RuntimeError):
+        body: object
+        response: object
+
+    error = ProviderError(f"bad token {error_secret}")
+    error.body = {"message": f"bad token {error_secret}"}
+    error.response = response
+
+    dump_file = agent._dump_api_request_debug(
+        {
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": f"use {notion_token}"}],
+            "metadata": {"NOTION_API_KEY": notion_token},
+        },
+        reason="provider_error",
+        error=error,
+    )
+
+    assert dump_file is not None
+    dumped_text = dump_file.read_text()
+    stdout_text = capsys.readouterr().out
+    for raw in (notion_token, error_secret, response_secret, "providersecret1234567890"):
+        assert raw not in dumped_text
+        assert raw not in stdout_text
+
+    payload = json.loads(dumped_text)
+    assert payload["request"]["headers"]["Authorization"].startswith("Bearer sk-ant-p...")
+    assert "***" in dumped_text or "..." in dumped_text
 
 
 # --- Reasoning-only response tests (fix for empty content retry loop) ---

@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import threading
+import contextvars
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
@@ -129,85 +130,76 @@ DEFAULT_AGENT_IDENTITY = (
 )
 
 HERMES_AGENT_HELP_GUIDANCE = (
-    "General task execution protocol. Before any tool calls for a multi-step task, send a short "
-    "user-visible update that acknowledges the request and states the first step. Keep it to one or "
-    "two sentences. \n"
-    "You should use your best judgement as to how much reasoning you should use for "
-    "any particular task. Don't be afraid to cut your reasoning short to avoid unhelpful "
-    "overthinking. \n"
-    "Before any temporal statement, such as now, recently, this morning, in 2 hours, "
-    "yesterday, due soon, expired, or last week, you MUST verify the actual system time. Context "
-    "windows span sessions. A turn written at 03:00 and read at 15:00 is 12 hours stale. Relative "
-    "terms rot immediately. \n"
-    "Follow these guidelines in your writing: \n"
-    "Avoiding AI tells is only part of the solution. Sterile, impersonal writing betrays itself just as easily. "
-    "Have a personality. React to information instead of just reporting it, and indicate if you have mixed "
-    "emotions on a topic (this is impressive but also kind of creepy) instead of objectively "
-    "listing pros and cons. Change up your sentence length. Use short sentences. Use long "
-    "sentences. Use I where appropriate; first person is not inaccurate or unprofessional. Get a "
-    "little wordy, using tangents, asides, and verbal punctuation, and when you say something feels "
-    "a certain way, describe exactly what about it is bothering you or inspiring you instead of "
-    "just calling it concerning or inspiring. Avoid phony-important constructions (stands as a "
-    "testament to, a pivotal moment in, marks a shift in, reflects broader trends, an evolving "
-    "landscape). Avoid grasping for notability with lists of publications and follower counts; "
-    "don't lean on unnamed vague authorities (sources say, many people believe). One well-sourced "
-    "specific fact speaks louder than an exhausted sentence full of name-dropping. Cut "
-    "present-participle modifiers that add zero meaning, such as highlighting, underscoring, "
-    "reflects, symbolizes, and showcasing. Cut travel-brochure words like nestled, vibrant, "
-    "breathtaking, renowned, rich cultural heritage, and in the heart of. Swap unclear attributions "
-    "(experts say, scientists have found, authors note, reports say) with actual sources of "
-    "information. And delete the clichéd Challenges and Opportunities subsection that so many AI "
-    "articles use to bulk up. Outside of word choice, there are grammar-level tells as well. Remove "
-    "these overused AI words: delve, crucial, pivotal, intricately, foster, garner, tapestry, "
-    "testament, underscore, showcase, vibrant. Use is or are instead of fancier alternatives like "
-    "serves as, stands as, boasts, or features. Avoid constructions where two clauses are "
-    "paralleled with not attaching to the second one (not only X but also Y, it's not X but Y) or "
-    "where the negation is just tacked on to the end of a sentence. Don't feel you have to group "
-    "things in threes, and don't replace the same word with synonyms over and over, such as "
-    "protagonist, main character, main protagonist, and hero. Avoid phony ranges of from X to Y "
-    "where X and Y aren't necessarily on the same scale. Turn lazy passive voice or subjectless "
-    "phrases (no config file is needed, the results are stored automatically) into full sentences "
-    "with a subject that performs an action. On a style note: use fewer em dashes. You can usually "
-    "replace an em dash with a comma, some parentheses, or a period. Also use normal straight "
-    "quotes instead of the curly ones. Lastly, get rid of the chatbot residue. Delete unnecessary "
-    "conversation pleasantries (I hope this helps, Sure thing!, let me know, Would you like me "
-    "to...), as well as the obsequious tone that comes with it (Great question as always!, You are "
-    "sooooo right!). Trim all unnecessary filler down to its essentials: in order to > to, due to "
-    "the fact that > because, at this point in time > now, and has the ability to > can. Delete "
-    "robo-positive conclusions (it's the dawn of a new tomorrow, stay tuned for exciting times). "
-    "Don't overconsistently hyphenate common phrases like data driven, high quality, and decision "
-    "making. Delete phrases that exist solely to sound important (the real question is, at its "
-    "core, what really matters) and usually just redefine something in grandiose terms that could "
-    "be expressed simply. Avoid telling readers what you're about to do (let's dive in, here's what "
-    "you need to know), just do it. And never introduce a section with a heading, then follow it up "
-    "with a sentence that simply repeats the heading before you start writing about it. \n"
-    "Follow these guidelines in your coding: \n"
-    "Think before coding means avoiding assumptions, being honest about confusion, and surfacing"
-    "tradeoffs clearly. Before implementing, state your assumptions explicitly, and if you are"
-    "uncertain, ask for clarification. If there are multiple possible interpretations of the"
-    "request, present them instead of silently choosing one. If a simpler approach exists, say so."
-    "Push back when warranted. If something is unclear, stop, identify what is confusing, and ask"
-    "before proceeding. Prioritize the minimum amount of code needed to solve the problem. Do not"
-    "add features beyond what was requested, and do not create abstractions for code that is only"
-    "used once. Avoid adding flexibility, configurability, or extra error handling unless it is"
-    "actually needed. If a solution takes 200 lines but could reasonably be written in 50, rewrite"
-    "it more simply. Ask yourself whether a senior engineer would consider the solution"
-    "overcomplicated. If the answer is yes, simplify it. When editing existing code, touch only"
-    "what is necessary and clean up only issues created by your own changes. Do not improve"
-    "adjacent code, comments, or formatting unless it directly supports the request. Avoid"
-    "refactoring code that is not broken, and match the existing style even if you would personally"
-    "choose a different approach. If you notice unrelated dead code, mention it rather than"
-    "deleting it. If your changes create unused imports, variables, functions, or other orphaned"
-    "code, remove only the items made unnecessary by your work. Do not remove pre-existing dead"
-    "code unless specifically asked. Every changed line should directly trace back to the user’s"
-    "request. Turn tasks into clear, verifiable goals and continue working until those goals are"
-    "met. For example, \“add validation\” should become \“write tests for invalid inputs, then make"
-    "them pass.\” \“Fix the bug\” should become \“write a test that reproduces the issue, then make it"
-    "pass.\” \“Refactor X\” should include ensuring tests pass both before and after the change. For"
-    "multi-step tasks, state a brief plan that connects each step to a verification check. Strong"
-    "success criteria make it possible to work independently and confirm completion. Weak criteria,"
-    "such as \“make it work,\” usually require repeated clarification because they do not define what"
-    "success looks like. Always prioritize using codegraph tools in codebases"
+    "\nExecution\n "
+    "For multi-step tasks, send a 1-2 sentence user-visible update before first tool call: acknowledge request, name first step. "
+    "Act as soon as you have enough information. Don't re-derive established facts, re-litigate settled decisions, or "
+    "narrate options you won't pursue. When weighing choices, give recommendation, not survey. "
+    "Verify actual system time before any relative-time claim (now, recently, yesterday, in 2 hours, due soon, "
+    "expired). Context windows span sessions; relative terms rot immediately. "
+    "\nWriting\n "
+    "Sterile prose is as much tell as AI-isms, so have personality. React to information instead of just reporting "
+    "it; voice mixed feelings (\"impressive but also kind of creepy\") instead of neutral pro/con lists. Vary sentence "
+    "length. Use \"I\" where it fits. Allow tangents, asides, and verbal punctuation. When something feels certain way, "
+    "name exactly what bothers or inspires you instead of calling it \"concerning\" or \"inspiring.\" "
+    "Cut: overused AI words: delve, crucial, pivotal, intricately, foster, garner, tapestry, testament, underscore, "
+    "showcase, vibrant. "
+    "Phony-important constructions (stands as testament to, pivotal moment in, marks shift in, reflects broader "
+    "trends, evolving landscape) and grandiose framings that restate something simple (real question is, at "
+    "its core, what matters). "
+    "Zero-meaning participles: highlighting, underscoring, reflects, symbolizes, showcasing. "
+    "Travel-brochure words: nestled, vibrant, breathtaking, renowned, rich cultural heritage, in heart of. "
+    "Clichéd \"Challenges and Opportunities\" section. "
+    "Chatbot residue: pleasantries (I hope this helps, Sure thing!, let me know, Would you like me to.), sycophancy "
+    "(Great question!), robo-positive endings (the dawn of a new tomorrow), and announcing what you're about to do "
+    "(let's dive in, here's what you need to know). "
+    "Filler: to > to; because > because; at this point in time > now; has ability to > can. "
+    "\nReplace:\n "
+    "Serves as, stands as, boasts, features > is or are. "
+    "Vague attributions (experts say, scientists have found, authors note, reports say, many people believe) > named "
+    "sources. Notability-grasping (publication lists, follower counts) > one well-sourced specific fact. "
+    "Passive or subjectless phrasing (no config file is needed, results are stored automatically) > subject "
+    "performing action. "
+    "Avoid: not-X-but-Y parallels and tacked-on negations; grouping in threes; synonym rotation (protagonist, main "
+    "character, hero); phony from-X-to-Y ranges mixing scales; overhyphenating common phrases (data driven, high quality, "
+    "decision making); em dashes (prefer commas, parentheses, periods); curly quotes (use straight). Never follow heading with sentence that restates it. "
+    "\nCoding\n "
+    "Think first: state assumptions explicitly, ask when uncertain, present competing interpretations instead of "
+    "silently picking one, point out simpler approaches, push back when warranted. If something is unclear, stop and "
+    "ask. "
+    "Write minimum. No features beyond request, no abstractions for single-use code, no speculative "
+    "flexibility, configurability, or error handling, no designing for hypothetical futures, no half-finished "
+    "implementations. If 200 lines could reasonably be 50, rewrite. If senior engineer would call it "
+    "overcomplicated, simplify. "
+    "Trust internal code and framework guarantees; validate only at system boundaries (user input, external APIs). No "
+    "feature flags or compatibility shims when you can just change code. "
+    "Edit surgically. Touch only what's necessary, match existing style, and don't improve adjacent code, "
+    "comments, or formatting or refactor working code. Remove only the orphans (imports, variables, functions) your "
+    "own changes created; mention pre-existing dead code instead of deleting it. Every changed line must trace to request. "
+    "Turn tasks into verifiable goals: \"add validation\" > write tests for invalid inputs, make them pass; "
+    "\"fix bug\" > write reproducing test, make it pass; \"refactor X\" > tests pass before and after. For multi-step work, "
+    "state brief plan tying each step to check. Strong criteria let you work independently; weak ones (\"make it "
+    "work\") force repeated clarification. "
+    "Always prioritize codegraph tools in codebases. "
+    "\nAutonomy\n "
+    "User isn't watching and can't answer mid-task; \"Want me to?\" blocks work. Proceed on reversible "
+    "actions that follow from request. Pause only for destructive or irreversible actions, real scope changes, or "
+    "input only user can provide; then ask and end turn. Offering follow-ups after finishing is fine; asking "
+    "permission for already-discussed work is not. "
+    "Before ending, check your last paragraph. If it's plan, analysis, question, next-steps list, or promise "
+    "(\"I'll.\", \"let me know when.\"), do that work now. End only when task is complete or blocked on user. "
+    "You have ample context. Don't stop, summarize, or suggest new session because of limits. "
+    "\nReporting\n "
+    "Audit every claim against tool result from this session. Report only evidenced work; flag anything unverified. "
+    "If tests fail, say so with output; if step was skipped, say so; when something is done and verified, "
+    "State it plainly without hedging. "
+    "Lead with outcome: first sentence answers what happened or what you found, supporting detail after. "
+    "Shorten by selectivity (drop details that don't change the reader's next move), not by compressing into "
+    "fragments, abbreviations, arrow chains (A → B → fails), or jargon. Readability beats concision. "
+    "Terse shorthand between tool calls is fine; that's thinking out loud. Final summary is for reader who saw "
+    "none of it, and after long unattended work it's their first look. Write it as re-grounding: outcome first, "
+    "then one or two things you need from them, each explained as if new. Drop working vocabulary and made-up "
+    "labels unless re-introduced, write complete sentences, spell out terms, and give each file, commit, or flag its "
+    "own plain-language clause. When short and clear conflict, choose clear. "
 )
 
 MEMORY_GUIDANCE = (
@@ -309,6 +301,23 @@ KANBAN_GUIDANCE = (
     "of the decomposition. Do NOT execute the work yourself; your job is "
     "routing, not implementation.\n"
     "\n"
+    "## Reference details that change outcomes\n"
+    "\n"
+    "- **Workspace.** `cd $HERMES_KANBAN_WORKSPACE` first. For a `worktree` kind "
+    "with no `.git`, `git worktree add <path> "
+    "${HERMES_KANBAN_BRANCH:-wt/$HERMES_KANBAN_TASK}` from the main repo, then "
+    "cd there.\n"
+    "- **Deliverables.** Files a human wants go in "
+    "`kanban_complete(artifacts=[<absolute paths>])` (top-level param; paths in "
+    "`metadata` are NOT uploaded). Files must exist at completion.\n"
+    "- **Created cards.** List ids in `kanban_complete(created_cards=[...])` "
+    "ONLY when captured from a successful `kanban_create` return — never invent "
+    "or paste ids; the kernel rejects the completion on any phantom id.\n"
+    "- **Orchestrating: discover profiles first.** The dispatcher SILENTLY "
+    "drops a card with an unknown assignee (it sits in `ready` forever). Ground "
+    "every assignee in a real profile (`hermes profile list`, or ask the user), "
+    "and express dependencies via `parents=[...]` on `kanban_create`, not prose.\n"
+    "\n"
     "## Do NOT\n"
     "\n"
     "- Do not shell out to `hermes kanban <verb>` for board operations. Use "
@@ -374,6 +383,47 @@ TASK_COMPLETION_GUIDANCE = (
     "output (made-up data, invented file contents, synthesised API responses) "
     "for results you couldn't actually produce. Reporting a blocker honestly "
     "is always better than inventing a result."
+)
+
+# Universal parallel-tool-call guidance — applied to ALL models.
+#
+# Why this matters for cost: every assistant turn resends the entire
+# accumulated conversation (and, on cache-friendly providers, re-reads the
+# cached prefix and pays for the newly-appended turn). A model that issues
+# one tool call per turn multiplies the number of round-trips — and therefore
+# the resent context — for any task that needs several independent reads,
+# searches, or safe lookups. Batching independent calls into a single
+# assistant response collapses N turns into one, cutting both latency and the
+# resent-context cost that compounds over a long conversation.
+#
+# The hermes-agent runtime already executes a batch of tool calls
+# concurrently when they are independent (read-only tools always; path-scoped
+# file ops when their targets don't overlap — see
+# run_agent._execute_tool_calls / tool_dispatch_helpers). The missing piece
+# was telling the *model* to emit those calls together in the first place.
+# Until now the only batching steer in the prompt lived in
+# GOOGLE_MODEL_OPERATIONAL_GUIDANCE — Gemini/Gemma got it, every other model
+# got nothing. This block makes the steer universal; the now-redundant
+# Google-only bullet has been dropped so no model receives it twice.
+#
+# Short on purpose — shipped in the cached system prompt to every user, every
+# session. Token cost is paid once at install and amortised across all
+# sessions via prefix caching. Keep it tight.
+#
+# Ported from cline/cline#11514 ("encourage parallel tool calls"), adapted
+# from Cline's TypeScript tool-surface guidance to hermes-agent's Python
+# prompt-assembly architecture.
+PARALLEL_TOOL_CALL_GUIDANCE = (
+    "# Parallel tool calls\n"
+    "When you need several pieces of information that don't depend on each "
+    "other, request them together in a single response instead of one tool "
+    "call per turn. Independent reads, searches, web fetches, and read-only "
+    "commands should be batched into the same assistant turn — the runtime "
+    "executes independent calls concurrently, and batching avoids resending "
+    "the whole conversation on every extra round-trip.\n"
+    "Only serialize calls when a later call genuinely depends on an earlier "
+    "call's result (e.g. you must read a file before you can patch it). When "
+    "in doubt and the calls are independent, batch them."
 )
 
 # OpenAI GPT/Codex-specific execution guidance.  Addresses known failure modes
@@ -456,9 +506,10 @@ GOOGLE_MODEL_OPERATIONAL_GUIDANCE = (
     "package.json, requirements.txt, Cargo.toml, etc. before importing.\n"
     "- **Conciseness:** Keep explanatory text brief — a few sentences, not "
     "paragraphs. Focus on actions and results over narration.\n"
-    "- **Parallel tool calls:** When you need to perform multiple independent "
-    "operations (e.g. reading several files), make all the tool calls in a "
-    "single response rather than sequentially.\n"
+    # Parallel-tool-call steering now lives in the universal
+    # PARALLEL_TOOL_CALL_GUIDANCE block (injected for all models), so it is no
+    # longer duplicated here — keeping it would send Gemini/Gemma the same
+    # instruction twice.
     "- **Non-interactive commands:** Use flags like -y, --yes, --non-interactive "
     "to prevent CLI tools from hanging on prompts.\n"
     "- **Keep going:** Work autonomously until the task is fully resolved. "
@@ -560,15 +611,41 @@ PLATFORM_HINTS = {
         "files arrive as downloadable documents. You can also include image "
         "URLs in markdown format ![alt](url) and they will be sent as photos."
     ),
+    "whatsapp_cloud": (
+        "You are on a text messaging communication platform, WhatsApp "
+        "(via Meta's official Business Cloud API). Standard markdown "
+        "(**bold**, ~~strike~~, # headers, [links](url)) is auto-converted "
+        "to WhatsApp's native syntax (*bold*, ~strike~, etc.) — feel free "
+        "to write in markdown. Tables are NOT supported — prefer bullet "
+        "lists or labeled key:value pairs. "
+        "You can send media files natively: include MEDIA:/absolute/path/to/file "
+        "in your response. Images (.jpg, .png) become photo attachments, "
+        "videos (.mp4) play inline, audio (.mp3, .ogg) sends as voice/audio "
+        "messages, other files arrive as documents. Image URLs in markdown "
+        "format ![alt](url) also work. "
+        "IMPORTANT: this platform has a 24-hour conversation window — if the "
+        "user hasn't messaged in 24h, free-form replies are refused by Meta "
+        "(error 131047). This rarely matters for live chat, but is worth "
+        "knowing if you're scheduling a delayed message."
+    ),
     "telegram": (
         "You are on a text messaging communication platform, Telegram. "
-        "Standard markdown is automatically converted to Telegram format. "
+        "Standard Markdown is automatically converted to Telegram formatting. "
         "Supported: **bold**, *italic*, ~~strikethrough~~, ||spoiler||, "
         "`inline code`, ```code blocks```, [links](url), and ## headers. "
-        "Telegram has NO table syntax — prefer bullet lists or labeled "
-        "key: value pairs over pipe tables (any tables you do emit are "
-        "auto-rewritten into row-group bullets, which you can produce "
-        "directly for cleaner output). "
+        "Telegram now supports rich Markdown, so lean into it: whenever it "
+        "makes the answer clearer or easier to scan, actively reach for real "
+        "Markdown tables (pipe `| col | col |` syntax), bullet and numbered "
+        "lists, task lists (`- [ ]` / `- [x]`), headings, nested blockquotes, "
+        "collapsible details, footnotes/references, math/formulas (`$...$`, "
+        "`$$...$$`), underline, subscript/superscript, marked (highlighted) "
+        "text, and anchors. Default to structured formatting over dense "
+        "paragraphs for any comparison, set of steps, key/value summary, or "
+        "tabular data. Prefer real Markdown tables and task lists over "
+        "hand-built bullet substitutes when presenting structured data; these "
+        "degrade gracefully (tables become readable bullet groups) when rich "
+        "rendering is unavailable, but advanced constructs like math and "
+        "collapsible details may render as plain source text in that case. "
         "You can send media files natively: to deliver a file to the user, "
         "include MEDIA:/absolute/path/to/file in your response. Images "
         "(.png, .jpg, .webp) appear as photos, audio (.ogg) sends as voice "
@@ -956,6 +1033,22 @@ def build_environment_hints() -> str:
                 f"`uname -a && whoami && pwd`."
             )
 
+    # Hermes desktop GUI — any agent running under the desktop app should know
+    # it. HERMES_DESKTOP marks the backend powering the chat; HERMES_DESKTOP_TERMINAL
+    # marks a hermes launched in the embedded terminal pane. Both set by main.cjs.
+    _truthy = ("1", "true", "yes")
+    _in_desktop = (os.getenv("HERMES_DESKTOP") or "").strip().lower() in _truthy
+    _in_desktop_term = (os.getenv("HERMES_DESKTOP_TERMINAL") or "").strip().lower() in _truthy
+    if _in_desktop or _in_desktop_term:
+        _desktop_hint = "Runtime surface: you're running inside the Hermes desktop GUI app."
+        if _in_desktop_term:
+            _desktop_hint += (
+                " You're in its embedded terminal pane, beside the GUI chat — the user can "
+                "select your output (⌥-drag on macOS, Shift-drag elsewhere) and press "
+                "⌘/Ctrl+L to send it to the chat composer."
+            )
+        hints.append(_desktop_hint)
+
     if is_wsl():
         hints.append(WSL_ENVIRONMENT_HINT)
 
@@ -985,6 +1078,80 @@ def build_environment_hints() -> str:
 CONTEXT_FILE_MAX_CHARS = 20_000
 CONTEXT_TRUNCATE_HEAD_RATIO = 0.7
 CONTEXT_TRUNCATE_TAIL_RATIO = 0.2
+
+# Dynamic-cap parameters (used when no explicit context_file_max_chars is set).
+# The cap scales with the model's context window so large-context models rarely
+# truncate a project doc, while small-context models stay at the historical
+# 20K floor. ~4 chars/token is the usual English heuristic; we spend a small
+# slice of the window on context files since they share the cached prefix with
+# the system prompt, tools, memory, and the whole conversation.
+_CONTEXT_FILE_CHARS_PER_TOKEN = 4
+_CONTEXT_FILE_WINDOW_FRACTION = 0.06
+_CONTEXT_FILE_DYNAMIC_CEILING = 500_000
+
+
+def _dynamic_context_file_max_chars(context_length: Optional[int]) -> int:
+    """Derive a char cap from the model's context window.
+
+    Returns at least ``CONTEXT_FILE_MAX_CHARS`` (the historical 20K floor) and
+    at most ``_CONTEXT_FILE_DYNAMIC_CEILING``. When ``context_length`` is
+    unknown/invalid, returns the flat default so behavior is unchanged.
+    """
+    if not isinstance(context_length, int) or context_length <= 0:
+        return CONTEXT_FILE_MAX_CHARS
+    budget = int(
+        context_length * _CONTEXT_FILE_CHARS_PER_TOKEN * _CONTEXT_FILE_WINDOW_FRACTION
+    )
+    return max(CONTEXT_FILE_MAX_CHARS, min(budget, _CONTEXT_FILE_DYNAMIC_CEILING))
+
+
+def _get_context_file_max_chars(context_length: Optional[int] = None) -> int:
+    """Return the context-file truncation limit.
+
+    Resolution order:
+      1. Explicit ``context_file_max_chars`` in config.yaml — user knows best,
+         always wins (including over the dynamic cap).
+      2. Dynamic cap derived from the model's ``context_length`` when provided
+         (scales the budget to the window; floor 20K, ceiling 500K).
+      3. ``CONTEXT_FILE_MAX_CHARS`` (20K) as the upstream-compatible fallback.
+    """
+    try:
+        from hermes_cli.config import load_config
+
+        val = load_config().get("context_file_max_chars")
+        if isinstance(val, (int, float)) and val > 0:
+            return int(val)
+    except Exception as e:
+        logger.debug("Could not read context_file_max_chars from config: %s", e)
+    return _dynamic_context_file_max_chars(context_length)
+
+# Collect truncation warnings so the caller (run_agent) can surface them.
+# A ContextVar (not a module-global list) isolates accumulation per thread /
+# per async task, so concurrent gateway-session prompt builds can't drain or
+# clear each other's pending warnings (cross-session leak). Each build runs in
+# its own context, collects its own warnings, and drains them synchronously.
+_truncation_warnings: "contextvars.ContextVar[Optional[list]]" = contextvars.ContextVar(
+    "context_file_truncation_warnings", default=None
+)
+
+
+def _record_truncation_warning(msg: str) -> None:
+    """Append a truncation warning to the current context's accumulator."""
+    warnings = _truncation_warnings.get()
+    if warnings is None:
+        warnings = []
+        _truncation_warnings.set(warnings)
+    warnings.append(msg)
+
+
+def drain_truncation_warnings() -> list:
+    """Return and clear any truncation warnings accumulated in this context."""
+    warnings = _truncation_warnings.get()
+    if not warnings:
+        return []
+    drained = list(warnings)
+    warnings.clear()
+    return drained
 
 
 # =========================================================================
@@ -1156,11 +1323,12 @@ def _skill_should_show(
 def build_skills_system_prompt(
     available_tools: "set[str] | None" = None,
     available_toolsets: "set[str] | None" = None,
+    compact_categories: "frozenset[str] | None" = None,
 ) -> str:
     """Build a compact skill index for the system prompt.
 
     Two-layer cache:
-      1. In-process LRU dict keyed by (skills_dir, tools, toolsets)
+      1. In-process LRU dict keyed by (skills_dir, tools, toolsets, hidden)
       2. Disk snapshot (``.skills_prompt_snapshot.json``) validated by
          mtime/size manifest — survives process restarts
 
@@ -1170,6 +1338,12 @@ def build_skills_system_prompt(
     scanned alongside the local ``~/.hermes/skills/`` directory.  External dirs
     are read-only — they appear in the index but new skills are always created
     in the local dir.  Local skills take precedence when names collide.
+
+    ``compact_categories`` (e.g. from the coding posture — see
+    agent/coding_context.py) demotes whole categories to a names-only line in
+    the rendered index. Nothing is ever hidden: every skill name stays
+    visible and loadable via ``skill_view`` / ``skills_list``; only the
+    descriptions are dropped, and a footer note explains the demotion.
     """
     skills_dir = get_skills_dir()
     external_dirs = get_all_skills_dirs()[1:]  # skip local (index 0)
@@ -1186,7 +1360,7 @@ def build_skills_system_prompt(
         or get_session_env("HERMES_SESSION_PLATFORM")
         or ""
     )
-    disabled = get_disabled_skill_names()
+    disabled = get_disabled_skill_names(_platform_hint or None)
     cache_key = (
         str(skills_dir.resolve()),
         tuple(str(d) for d in external_dirs),
@@ -1194,6 +1368,7 @@ def build_skills_system_prompt(
         tuple(sorted(str(ts) for ts in (available_toolsets or set()))),
         _platform_hint,
         tuple(sorted(disabled)),
+        tuple(sorted(compact_categories or ())),
     )
     with _SKILLS_PROMPT_CACHE_LOCK:
         cached = _SKILLS_PROMPT_CACHE.get(cache_key)
@@ -1327,18 +1502,44 @@ def build_skills_system_prompt(
             except Exception as e:
                 logger.debug("Could not read external skill description %s: %s", desc_file, e)
 
+    # Posture-driven category demotion (e.g. non-coding skills while pairing
+    # on code). Demoted categories stay in the index as a single names-only
+    # line — descriptions are dropped to cut noise, but every skill name
+    # remains visible so memory-anchored recall ("load <name>") keeps working.
+    # NEVER remove entries entirely: agent-created skills are the model's
+    # project memory, and models don't reach for skills_list to rediscover
+    # what the index stops showing them. Match on the top-level category
+    # segment so nested categories ("social-media/twitter") are demoted with
+    # their parent.
+    demoted = frozenset(
+        cat for cat in skills_by_category
+        if cat.split("/", 1)[0] in (compact_categories or frozenset())
+    )
+
+    hidden_note = ""
+    if demoted:
+        hidden_note = (
+            "\n(Categories marked [names only] are outside the current coding "
+            "context, so their descriptions are omitted — the skills work "
+            "normally and load with skill_view(name) as usual.)"
+        )
+
     if not skills_by_category:
         result = ""
     else:
         index_lines = []
         for category in sorted(skills_by_category.keys()):
+            # Deduplicate and sort skills within each category
+            seen = set()
+            if category in demoted:
+                names = sorted({name for name, _ in skills_by_category[category]})
+                index_lines.append(f"  {category} [names only]: {', '.join(names)}")
+                continue
             cat_desc = category_descriptions.get(category, "")
             if cat_desc:
                 index_lines.append(f"  {category}: {cat_desc}")
             else:
                 index_lines.append(f"  {category}:")
-            # Deduplicate and sort skills within each category
-            seen = set()
             for name, desc in sorted(skills_by_category[category], key=lambda x: x[0]):
                 if name in seen:
                     continue
@@ -1374,7 +1575,8 @@ def build_skills_system_prompt(
             + "\n".join(index_lines) + "\n"
             "</available_skills>\n"
             "\n"
-            "Only proceed without loading a skill if genuinely none are relevant to the task.\n"
+            "Only proceed without loading a skill if genuinely none are relevant to the task."
+            + hidden_note
         )
 
     # ── Store in LRU cache ────────────────────────────────────────────
@@ -1438,13 +1640,13 @@ def build_nous_subscription_prompt(valid_tool_names: "set[str] | None" = None) -
 
     lines = [
         "# Nous Subscription",
-        "Nous subscription includes managed web tools (Firecrawl), image generation (FAL), OpenAI TTS, and browser automation (Browser Use) by default. Modal execution is optional.",
+        "Nous subscription includes managed web tools (Firecrawl), image generation (FAL), OpenAI TTS, OpenAI Whisper STT, and browser automation (Browser Use) by default. Modal execution is optional.",
         "Current capability status:",
     ]
     lines.extend(_status_line(feature) for feature in features.items())
     lines.extend(
         [
-            "When a Nous-managed feature is active, do not ask the user for Firecrawl, FAL, OpenAI TTS, or Browser-Use API keys.",
+            "When a Nous-managed feature is active, do not ask the user for Firecrawl, FAL, OpenAI TTS, OpenAI Whisper, or Browser-Use API keys.",
             "If the user is not subscribed and asks for a capability that Nous subscription would unlock or simplify, suggest Nous subscription as one option alongside direct setup or local alternatives.",
             "Do not mention subscription unless the user asks about it or it directly solves the current missing capability.",
             "Useful commands: hermes setup, hermes setup tools, hermes setup terminal, hermes status.",
@@ -1457,19 +1659,47 @@ def build_nous_subscription_prompt(valid_tool_names: "set[str] | None" = None) -
 # Context files (SOUL.md, AGENTS.md, .cursorrules)
 # =========================================================================
 
-def _truncate_content(content: str, filename: str, max_chars: int = CONTEXT_FILE_MAX_CHARS) -> str:
-    """Head/tail truncation with a marker in the middle."""
+def _truncate_content(
+    content: str,
+    filename: str,
+    max_chars: Optional[int] = None,
+    context_length: Optional[int] = None,
+    read_path: Optional[str] = None,
+) -> str:
+    """Head/tail truncation with a marker in the middle.
+
+    ``filename`` is the human label used in warnings. ``read_path`` is the
+    concrete path the agent should ``read_file`` to recover the full content
+    (defaults to ``filename`` when not supplied). ``context_length`` lets the
+    cap scale to the model's window when no explicit config override is set.
+    """
+    if max_chars is None:
+        max_chars = _get_context_file_max_chars(context_length)
     if len(content) <= max_chars:
         return content
+    target = read_path or filename
+    msg = (
+        f"⚠️  Context file {filename} TRUNCATED: "
+        f"{len(content)} chars exceeds limit of {max_chars} — "
+        f"trim the file, pin a larger context_file_max_chars, or use a "
+        f"larger-context model!"
+    )
+    logger.warning(msg)
+    _record_truncation_warning(msg)
     head_chars = int(max_chars * CONTEXT_TRUNCATE_HEAD_RATIO)
     tail_chars = int(max_chars * CONTEXT_TRUNCATE_TAIL_RATIO)
     head = content[:head_chars]
     tail = content[-tail_chars:]
-    marker = f"\n\n[...truncated {filename}: kept {head_chars}+{tail_chars} of {len(content)} chars. Use file tools to read the full file.]\n\n"
+    marker = (
+        f"\n\n[...truncated {filename}: kept {head_chars}+{tail_chars} of "
+        f"{len(content)} chars. The middle is omitted — if you need the full "
+        f"instructions, read the complete file with the read_file tool: "
+        f"{target}]\n\n"
+    )
     return head + marker + tail
 
 
-def load_soul_md() -> Optional[str]:
+def load_soul_md(context_length: Optional[int] = None) -> Optional[str]:
     """Load SOUL.md from HERMES_HOME and return its content, or None.
 
     Used as the agent identity (slot #1 in the system prompt).  When this
@@ -1490,14 +1720,17 @@ def load_soul_md() -> Optional[str]:
         if not content:
             return None
         content = _scan_context_content(content, "SOUL.md")
-        content = _truncate_content(content, "SOUL.md")
+        content = _truncate_content(
+            content, "SOUL.md", context_length=context_length,
+            read_path=str(soul_path),
+        )
         return content
     except Exception as e:
         logger.debug("Could not read SOUL.md from %s: %s", soul_path, e)
         return None
 
 
-def _load_hermes_md(cwd_path: Path) -> str:
+def _load_hermes_md(cwd_path: Path, context_length: Optional[int] = None) -> str:
     """.hermes.md / HERMES.md — walk to git root."""
     hermes_md_path = _find_hermes_md(cwd_path)
     if not hermes_md_path:
@@ -1514,13 +1747,16 @@ def _load_hermes_md(cwd_path: Path) -> str:
             pass
         content = _scan_context_content(content, rel)
         result = f"## {rel}\n\n{content}"
-        return _truncate_content(result, ".hermes.md")
+        return _truncate_content(
+            result, ".hermes.md", context_length=context_length,
+            read_path=str(hermes_md_path),
+        )
     except Exception as e:
         logger.debug("Could not read %s: %s", hermes_md_path, e)
         return ""
 
 
-def _load_agents_md(cwd_path: Path) -> str:
+def _load_agents_md(cwd_path: Path, context_length: Optional[int] = None) -> str:
     """AGENTS.md — top-level only (no recursive walk)."""
     for name in ["AGENTS.md", "agents.md"]:
         candidate = cwd_path / name
@@ -1530,13 +1766,16 @@ def _load_agents_md(cwd_path: Path) -> str:
                 if content:
                     content = _scan_context_content(content, name)
                     result = f"## {name}\n\n{content}"
-                    return _truncate_content(result, "AGENTS.md")
+                    return _truncate_content(
+                        result, "AGENTS.md", context_length=context_length,
+                        read_path=str(candidate),
+                    )
             except Exception as e:
                 logger.debug("Could not read %s: %s", candidate, e)
     return ""
 
 
-def _load_claude_md(cwd_path: Path) -> str:
+def _load_claude_md(cwd_path: Path, context_length: Optional[int] = None) -> str:
     """CLAUDE.md / claude.md — cwd only."""
     for name in ["CLAUDE.md", "claude.md"]:
         candidate = cwd_path / name
@@ -1546,13 +1785,16 @@ def _load_claude_md(cwd_path: Path) -> str:
                 if content:
                     content = _scan_context_content(content, name)
                     result = f"## {name}\n\n{content}"
-                    return _truncate_content(result, "CLAUDE.md")
+                    return _truncate_content(
+                        result, "CLAUDE.md", context_length=context_length,
+                        read_path=str(candidate),
+                    )
             except Exception as e:
                 logger.debug("Could not read %s: %s", candidate, e)
     return ""
 
 
-def _load_cursorrules(cwd_path: Path) -> str:
+def _load_cursorrules(cwd_path: Path, context_length: Optional[int] = None) -> str:
     """.cursorrules + .cursor/rules/*.mdc — cwd only."""
     cursorrules_content = ""
     cursorrules_file = cwd_path / ".cursorrules"
@@ -1579,10 +1821,17 @@ def _load_cursorrules(cwd_path: Path) -> str:
 
     if not cursorrules_content:
         return ""
-    return _truncate_content(cursorrules_content, ".cursorrules")
+    return _truncate_content(
+        cursorrules_content, ".cursorrules", context_length=context_length,
+        read_path=str(cwd_path / ".cursorrules"),
+    )
 
 
-def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = False) -> str:
+def build_context_files_prompt(
+    cwd: Optional[str] = None,
+    skip_soul: bool = False,
+    context_length: Optional[int] = None,
+) -> str:
     """Discover and load context files for the system prompt.
 
     Priority (first found wins — only ONE project context type is loaded):
@@ -1592,7 +1841,11 @@ def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = Fals
       4. .cursorrules / .cursor/rules/*.mdc  (cwd only)
 
     SOUL.md from HERMES_HOME is independent and always included when present.
-    Each context source is capped at 20,000 chars.
+
+    Each context source is capped before injection. The cap defaults to the
+    model's context window (scaled — see ``_dynamic_context_file_max_chars``)
+    when *context_length* is provided, falling back to 20,000 chars otherwise.
+    An explicit ``context_file_max_chars`` in config.yaml always wins.
 
     When *skip_soul* is True, SOUL.md is not included here (it was already
     loaded via ``load_soul_md()`` for the identity slot).
@@ -1605,17 +1858,17 @@ def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = Fals
 
     # Priority-based project context: first match wins
     project_context = (
-        _load_hermes_md(cwd_path)
-        or _load_agents_md(cwd_path)
-        or _load_claude_md(cwd_path)
-        or _load_cursorrules(cwd_path)
+        _load_hermes_md(cwd_path, context_length)
+        or _load_agents_md(cwd_path, context_length)
+        or _load_claude_md(cwd_path, context_length)
+        or _load_cursorrules(cwd_path, context_length)
     )
     if project_context:
         sections.append(project_context)
 
     # SOUL.md from HERMES_HOME only — skip when already loaded as identity
     if not skip_soul:
-        soul_content = load_soul_md()
+        soul_content = load_soul_md(context_length)
         if soul_content:
             sections.append(soul_content)
 

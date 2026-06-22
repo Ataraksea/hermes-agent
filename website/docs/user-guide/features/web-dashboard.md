@@ -28,6 +28,7 @@ This starts a local web server and opens `http://127.0.0.1:9119` in your browser
 | `--host` | `127.0.0.1` | Bind address |
 | `--no-open` | — | Don't auto-open the browser |
 | `--insecure` | off | Allow binding to non-localhost hosts (**DANGEROUS** — exposes API keys on the network; pair with a firewall and strong auth) |
+| `--isolated` | off | When launched from a named profile (`worker dashboard`), run a dedicated per-profile server instead of routing to the machine dashboard |
 
 ```bash
 # Custom port
@@ -39,6 +40,43 @@ hermes dashboard --host 0.0.0.0
 # Start without opening browser
 hermes dashboard --no-open
 ```
+
+## Managing multiple profiles
+
+The dashboard is a **machine-level** management surface: one server manages
+every [profile](../profiles.md) on the machine. A profile switcher in the
+sidebar (visible whenever more than one profile exists) decides which
+profile the management pages read and write — Config, API Keys, Skills,
+MCP, Models, and the Chat tab all follow it. While a profile other than
+the dashboard's own is selected, an amber banner names the managed profile
+so the write target is never ambiguous.
+
+The selection lives in the URL (`?profile=<name>`), so deep links like
+`http://127.0.0.1:9119/skills?profile=worker` land with the switcher
+preselected and survive refresh.
+
+Launching the dashboard from a profile alias routes to the machine
+dashboard instead of starting a second server:
+
+```bash
+worker dashboard
+# → already running: opens the browser at ?profile=worker
+# → not running:     starts the machine dashboard with "worker" preselected
+```
+
+Pass `--isolated` to opt out and run a dedicated server scoped to that
+profile (the pre-unification behavior — useful if you deliberately expose
+different profiles' dashboards with different auth).
+
+The **Chat** tab follows the switcher too: a scoped chat spawns its PTY
+child with the selected profile's `HERMES_HOME`, so the conversation runs
+with that profile's model, skills, memory, and session history. Switching
+profiles starts a fresh terminal session.
+
+What stays per-profile and is *not* absorbed by the switcher: gateway
+processes (manage them via `hermes -p <name> gateway …`), each profile's
+session database, and cron schedulers (the Cron page already aggregates
+across profiles with its own filter).
 
 ## Prerequisites
 
@@ -81,6 +119,8 @@ The **Chat** tab embeds the full Hermes TUI (the same interface you get from `he
 
 **Resume an existing session:** from the **Sessions** tab, click the play icon (▶) next to any session. That jumps to `/chat?resume=<id>` and launches the TUI with `--resume`, loading the full history.
 
+**Session switcher (right rail):** the Chat tab carries its own ChatGPT-style conversation list in a thin right rail beside the terminal, so you can swap conversations without leaving the page. The rail stacks the model picker on top and the session list directly below it; the terminal takes up most of the screen. The list shows your most recent sessions for the active profile — title (falling back to a message preview), relative last-active time, message count, and the source channel for non-CLI sessions. Click any row to resume it in place (the terminal respawns with that conversation's history); the active session is highlighted. **New chat** starts a fresh session, and a refresh control re-pulls the list. The rail is read-only for switching — delete, rename, export, and bulk cleanup still live on the **Sessions** tab. On narrow screens it folds into a slide-over panel.
+
 **Prerequisites:**
 
 - Node.js (same requirement as `hermes --tui`; the TUI bundle is built on first launch)
@@ -93,13 +133,13 @@ To point [Hermes Desktop](#connecting-hermes-desktop-to-a-remote-backend) at a d
 
 ### Connecting Hermes Desktop to a remote backend
 
-Hermes Desktop normally launches its own local backend, but it can also attach to a dashboard running on a remote machine (a VM, a homelab box, etc.) via **Settings → Gateway → Remote gateway**. This is the most common source of "Desktop says the backend is ready but chat never works" reports, because Desktop's readiness check verifies less than the live chat connection actually needs.
+Hermes Desktop normally launches its own local backend, but it can also attach to a dashboard running on a remote machine (a VM, a homelab box, etc.) via **Settings → Gateway → Remote gateway**. Desktop verifies the same live chat path it will use at boot, so a stale token/OAuth session or blocked WebSocket is reported before the app declares the remote backend ready.
 
 :::info Prerequisite: a `hermes dashboard` must be running on the remote host
 The "remote backend" Desktop connects to **is** a `hermes dashboard` process running on the remote machine — the same server this page documents. It has to be up and reachable before any of the steps below matter; Desktop attaches to it, it doesn't start it for you. Keep it running under `systemd`/`tmux`/etc. so it survives logout and reboots. The **gateway** (Telegram/Discord/Slack/etc.) is a *separate* long-running process — start it independently if you rely on messaging channels; it is not the thing the desktop app connects to.
 :::
 
-Desktop's "remote backend is ready" probe only hits `GET /api/status`, which is a public endpoint — it answers as soon as *any* dashboard is running on the host. The live chat connection is a **separate** WebSocket to `/api/ws` (and `/api/pty`), and that socket is gated by two more checks the status probe never touches:
+Desktop's remote readiness probe first hits `GET /api/status` to confirm a dashboard is reachable, then opens the live WebSocket to `/api/ws` with the same authentication path the renderer will use (`?token=...` for token mode, or a freshly minted `?ticket=...` for OAuth mode). If either leg fails, Desktop does **not** report the remote backend as ready; it asks you to sign in again, refresh the saved token, fix the proxy/WebSocket route, or switch back to Local. The WebSocket leg matters because it is gated by checks the public status endpoint never touches:
 
 1. **You must be authenticated.** When the dashboard is bound to a non-loopback address it engages its auth gate. Protect it with a username and password (the bundled [username/password provider](#usernamepassword-provider-no-oauth-idp)); Desktop signs in once and reuses the resulting session for the WebSocket via a single-use ticket. Without a configured provider, a non-loopback dashboard **fails closed at startup**.
 2. **The bind host must allow the client and match the Host header.** A loopback bind (`127.0.0.1`) only accepts loopback clients, so a remote machine is rejected at the socket layer regardless of credentials. Bind to a non-loopback address (`--host 0.0.0.0`) so the peer-IP guard lets the remote client through. The remote URL you enter in Desktop must reach the dashboard by the same host it bound to — the DNS-rebinding guard requires the Host header to match.
@@ -144,6 +184,9 @@ If `/api/status` shows the gate is on with the `"basic"` provider and Desktop *s
 ### Config
 
 A form-based editor for `config.yaml`. All 150+ configuration fields are auto-discovered from `DEFAULT_CONFIG` and organized into tabbed categories:
+
+![Config admin page — section filters on the left, auto-discovered fields on the right](/img/dashboard/admin-config.png)
+
 
 - **model** — default model, provider, base URL, reasoning settings
 - **terminal** — backend (local/docker/ssh/modal), timeout, shell preferences
@@ -230,6 +273,17 @@ Create and manage scheduled cron jobs that run agent prompts on a recurring sche
 - **Edit** — open a pre-filled modal to change a job's prompt, schedule, name, or delivery target
 - **Trigger now** — immediately execute a job outside its normal schedule
 - **Delete** — permanently remove a cron job
+
+### Profiles
+
+Create and manage [profiles](../profiles.md) — isolated Hermes instances with their own config, skills, and sessions.
+
+- **Profile cards** — each shows its model/provider, skill count, gateway state, description, and badges (active, default, alias)
+- **Create** — name + optional clone-from-default / clone-everything / no-bundled-skills, description, and model; the dedicated Profile Builder page (`/profiles/new`) offers the full flow (model, MCPs, skills)
+- **Manage skills & tools** — jumps to the Skills page scoped to that profile (sets the sidebar profile switcher)
+- **Set as active** — flips the sticky default that **future CLI/gateway runs** pick up (same as `hermes profile use`). This does *not* change what the dashboard manages — that's the profile switcher's job
+- **Edit model / description / SOUL** — inline editors writing into that profile
+- **Rename / Delete** — named profiles only
 
 ### Skills
 
@@ -345,6 +399,16 @@ This re-reads `~/.hermes/.env` into the running process's environment. Useful wh
 ## REST API
 
 The web dashboard exposes a REST API that the frontend consumes. You can also call these endpoints directly for automation:
+
+:::tip Profile-scoped endpoints
+The management endpoint families — `/api/config`, `/api/env`, `/api/skills`,
+`/api/tools/toolsets`, `/api/mcp`, and `/api/model/{info,options,auxiliary,set}` —
+accept an optional `?profile=<name>` query parameter (or `"profile"` in the
+JSON body for writes) that scopes the read/write to that profile's
+`HERMES_HOME`. Omitted = the dashboard's own profile. Unknown profile names
+return `404`. The `/api/pty` WebSocket accepts the same parameter to spawn
+a chat under the selected profile.
+:::
 
 ### GET /api/status
 
@@ -478,7 +542,7 @@ same auth gate as the rest of `/api/`.
 | `GET /api/ops/checkpoints` · `POST .../prune` | Inspect / prune the `/rollback` store |
 | `POST /api/ops/hooks` · `DELETE /api/ops/hooks` | Create / remove a shell hook (consent-gated) |
 | `GET /api/system/stats` | Host stats — OS, CPU, memory, disk, uptime |
-| `GET /api/hermes/update/check` | Report update availability (commits behind, install method) without applying. `?force=1` busts the 6h cache |
+| `GET /api/hermes/update/check` | Report update availability (commits behind, install method) without applying. For git/pip installs that are behind, also returns a `commits` list (`sha`, `summary`, `author`, `at`) of what's changed. `?force=1` busts the 6h cache |
 | `GET /api/curator` · `PUT .../paused` · `POST .../run` | Skill-curator status + pause/resume + run |
 | `GET /api/portal` | Nous Portal auth + Tool Gateway routing (read-only) |
 | `POST /api/ops/prompt-size` · `/dump` · `/config-migrate` | Diagnostics (backgrounded) |
@@ -520,6 +584,8 @@ The gate is on if and only if:
 ### Fail-closed semantics
 
 If the gate would engage but **no** `DashboardAuthProvider` is registered (no Nous plugin, no custom plugin), `hermes dashboard` refuses to bind with an explicit error message. There is no "default-deny but accept everything" fallback — a misconfigured gated dashboard never starts.
+
+When you run `hermes dashboard --host 0.0.0.0` **interactively** (a real terminal) and no provider is configured yet, Hermes doesn't just fail — it offers to set one up on the spot: pick **username & password** (writes `dashboard.basic_auth` to `config.yaml` and you're running in seconds) or **OAuth** (points you at `hermes dashboard register`). Non-interactive callers — Docker/s6, CI, piped runs — skip the prompt and hit the fail-closed error above, so an unattended deploy still never starts without auth.
 
 ### Default provider: Nous Research
 
@@ -1019,6 +1085,8 @@ When you run `hermes update`, the web frontend is automatically rebuilt if `npm`
 The dashboard ships with six built-in themes and can be extended with user-defined themes, plugin tabs, and backend API routes — all drop-in, no repo clone needed.
 
 **Switch themes live** from the header bar — click the palette icon next to the language switcher. Selection persists to `config.yaml` under `dashboard.theme` and is restored on page load.
+
+**Change the font independently** from the same picker — the **Font** section below the theme list overrides the UI font of whatever theme is active. The choice persists across theme switches (`config.yaml` → `dashboard.font`); pick **Theme default** to clear it and return to the active theme's own font.
 
 Built-in themes:
 
