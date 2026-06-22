@@ -89,74 +89,6 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         base_url_override="acp://copilot",
         base_url_env_var="COPILOT_ACP_BASE_URL",
     ),
-    # -- ACP agent providers (Agent Client Protocol) -------------------------
-    # Each spawns the named agent via its official ACP adapter.
-    "claude-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://claude",
-    ),
-    "codex-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://codex",
-    ),
-    "gemini-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://gemini",
-    ),
-    "cursor-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://cursor",
-    ),
-    "kiro-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://kiro",
-    ),
-    "kilocode-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://kilocode",
-    ),
-    "opencode-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://opencode",
-    ),
-    "kimi-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://kimi",
-    ),
-    "qwen-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://qwen",
-    ),
-    "cline-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://cline",
-    ),
-    "amp-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://amp",
-    ),
-    "droid-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://droid",
-    ),
-    "iflow-acp": HermesOverlay(
-        transport="codex_responses",
-        auth_type="external_process",
-        base_url_override="acp://iflow",
-    ),
-    # -- End ACP agent providers ---------------------------------------------
     "github-copilot": HermesOverlay(
         transport="openai_chat",
         extra_env_vars=("COPILOT_GITHUB_TOKEN", "GH_TOKEN"),
@@ -273,15 +205,6 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
     "bedrock": HermesOverlay(
         transport="bedrock_converse",
         auth_type="aws_sdk",
-    ),
-    "vertex": HermesOverlay(
-        transport="openai_chat",
-        auth_type="vertex",
-        extra_env_vars=(
-            "VERTEX_CREDENTIALS_PATH",
-            "GOOGLE_APPLICATION_CREDENTIALS",
-            "VERTEX_PROJECT_ID",
-        ),
     ),
 }
 
@@ -424,10 +347,6 @@ ALIASES: Dict[str, str] = {
     "llamacpp": "local",
     "llama.cpp": "local",
     "llama-cpp": "local",
-
-    # google vertex
-    "vertex-ai": "vertex",
-    "google-vertex": "vertex",
 }
 
 
@@ -447,7 +366,6 @@ _LABEL_OVERRIDES: Dict[str, str] = {
     "local": "Local endpoint",
     "bedrock": "AWS Bedrock",
     "ollama-cloud": "Ollama Cloud",
-    "vertex": "Google Vertex AI",
     "xai-oauth": "xAI Grok OAuth (SuperGrok / Premium+)",
 }
 
@@ -569,6 +487,41 @@ def is_aggregator(provider: str) -> bool:
         return True
     pdef = get_provider(provider_norm)
     return pdef.is_aggregator if pdef else False
+
+
+# Flat-namespace resellers (e.g. opencode-go, opencode-zen) are flagged
+# ``is_aggregator=True`` because their live ``/v1/models`` returns bare model
+# IDs ("deepseek-v4-flash") rather than ``vendor/model`` routing slugs — the
+# model-switch resolver relies on that flag to search their flat catalog
+# (see model_switch.py step d). But they are NOT routing aggregators: every
+# model they list is a first-party model served under their own subscription,
+# not a passthrough route to another provider's endpoint. The picker dedup
+# (build_models_payload) must treat them differently from true routers like
+# OpenRouter — a reseller's first-party "minimax-m3" must never be stripped
+# just because a user's custom proxy also happens to serve a same-named model.
+_FLAT_NAMESPACE_RESELLERS: frozenset[str] = frozenset({
+    # Use normalized provider IDs: normalize_provider("opencode-zen") -> "opencode".
+    "opencode-go",
+    "opencode",
+})
+
+
+def is_routing_aggregator(provider: str) -> bool:
+    """Return True only for TRUE routing aggregators (e.g. OpenRouter, named
+    ``custom:*`` proxies) — those that route bare/vendor-slugged model names
+    to *other* providers' endpoints.
+
+    Distinct from :func:`is_aggregator`, which also reports True for
+    flat-namespace resellers (opencode-go/zen) whose catalog is entirely
+    first-party. Use this gate when the question is "would selecting this
+    model silently re-route the call away from the user's intended provider?"
+    — i.e. the picker dedup. Resellers answer no: their listed models are
+    their own, so their rows must not be deduped against user proxies.
+    """
+    provider_norm = normalize_provider(provider or "")
+    if provider_norm in _FLAT_NAMESPACE_RESELLERS:
+        return False
+    return is_aggregator(provider_norm)
 
 
 def determine_api_mode(provider: str, base_url: str = "") -> str:

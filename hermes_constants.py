@@ -402,7 +402,6 @@ def _profile_home_path(env: dict[str, str] | None = None) -> str | None:
     return None
 
 
-
 def _is_profile_home(candidate: str | None, profile_home: str | None) -> bool:
     return bool(candidate and profile_home and _norm_home_path(candidate) == _norm_home_path(profile_home))
 
@@ -504,13 +503,13 @@ def apply_subprocess_home_env(env: dict[str, str]) -> None:
         env["HOME"] = home
 
 
-VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
+VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 
 
 def parse_reasoning_effort(effort: str) -> dict | None:
     """Parse a reasoning effort level into a config dict.
 
-    Valid levels: "none", "minimal", "low", "medium", "high", "xhigh", "max".
+    Valid levels: "none", "minimal", "low", "medium", "high", "xhigh".
     Returns None when the input is empty or unrecognized (caller uses default).
     Returns {"enabled": False} for "none".
     Returns {"enabled": True, "effort": <level>} for valid effort levels.

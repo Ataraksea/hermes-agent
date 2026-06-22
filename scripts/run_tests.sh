@@ -64,46 +64,11 @@ fi
 echo "▶ running per-file parallel test suite via run_tests_parallel.py"
 echo "  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)"
 
-# Use the system env(1). Some developer PATHs shadow it with a broken
-# /home/me/.local/bin/env that silently no-ops child processes (exit 0,
-# no stdout, no side effects) — which made this script look like it ran
-# while doing nothing.
-ENV="/usr/bin/env"
-if [ ! -x "$ENV" ]; then
-  ENV="$(command -v env)"
-fi
-
 cd "$REPO_ROOT"
 
-# env -i gives a fully hermetic environment on CI/Linux. Probe before relying
-# on it; fall back to inheriting the parent env (conftest.py still unsets
-# credentials per-test).
-_ENV_I_PROBE="$(mktemp "${TMPDIR:-/tmp}/hermes-env-i-probe.XXXXXX")"
-_ENV_I_WORKS=0
-if "$ENV" -i \
+exec env -i \
   PATH="$PATH" \
   HOME="$HOME" \
-  "$PYTHON" -c "open('${_ENV_I_PROBE}', 'w').write('ok')" 2>/dev/null \
-  && [ -s "${_ENV_I_PROBE}" ]; then
-  _ENV_I_WORKS=1
-fi
-rm -f "${_ENV_I_PROBE}"
-
-if [ "${_ENV_I_WORKS}" -eq 1 ]; then
-  exec "$ENV" -i \
-    PATH="$PATH" \
-    HOME="$HOME" \
-    TZ=UTC \
-    LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    PYTHONHASHSEED=0 \
-    ${EXTRA_PYTHONPATH:+PYTHONPATH="$EXTRA_PYTHONPATH"} \
-    ${EXTRA_PYTEST_PLUGINS:+PYTEST_PLUGINS="$EXTRA_PYTEST_PLUGINS"} \
-    "$PYTHON" "$SCRIPT_DIR/run_tests_parallel.py" "$@"
-fi
-
-echo "  (env -i unavailable in this runtime; using conftest hermetic guards)" >&2
-exec "$ENV" \
   TZ=UTC \
   LANG=C.UTF-8 \
   LC_ALL=C.UTF-8 \

@@ -5595,23 +5595,6 @@ class TestFallbackAnthropicProvider:
         assert agent.api_mode == "chat_completions"
         assert agent.client is mock_client
 
-    def test_fallback_to_google_gemini_cli_sets_chat_completions(self, agent):
-        agent._fallback_activated = False
-        agent._fallback_model = {"provider": "google-gemini-cli", "model": "gemini-2.5-flash"}
-        agent._fallback_chain = [agent._fallback_model]
-        agent._fallback_index = 0
-
-        mock_client = MagicMock()
-        mock_client.base_url = "cloudcode-pa://google"
-        mock_client.api_key = "oauth-token"
-
-        with patch("agent.auxiliary_client.resolve_provider_client", return_value=(mock_client, None)):
-            result = agent._try_activate_fallback()
-
-        assert result is True
-        assert agent.api_mode == "chat_completions"
-        assert agent.client is mock_client
-
 
 def test_aiagent_uses_copilot_acp_client():
     with (

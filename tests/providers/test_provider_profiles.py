@@ -472,22 +472,6 @@ class TestQwenProfile:
         assert "metadata" not in eb
 
 
-class TestGoogleGeminiCliProfile:
-    def test_profile_registered(self):
-        p = get_provider_profile("google-gemini-cli")
-        assert p is not None
-        assert p.name == "google-gemini-cli"
-        assert p.auth_type == "oauth_external"
-
-    def test_aliases_still_resolve_to_google_gemini_cli(self):
-        assert get_provider_profile("gemini-cli").name == "google-gemini-cli"
-        assert get_provider_profile("gemini-oauth").name == "google-gemini-cli"
-
-    def test_default_aux_model(self):
-        p = get_provider_profile("google-gemini-cli")
-        assert p.default_aux_model == "gemini-2.5-flash"
-
-
 class TestBaseProfile:
     def test_prepare_messages_passthrough(self):
         p = ProviderProfile(name="test")

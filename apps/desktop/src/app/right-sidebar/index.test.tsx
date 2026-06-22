@@ -49,14 +49,7 @@ describe('RightSidebarPane', () => {
   it('refreshes the current tree without opening the folder picker', async () => {
     const onChangeCwd = vi.fn()
 
-    render(
-      <RightSidebarPane
-        onActivateFile={vi.fn()}
-        onActivateFolder={vi.fn()}
-        onChangeCwd={onChangeCwd}
-        requestGateway={vi.fn()}
-      />
-    )
+    render(<RightSidebarPane onActivateFile={vi.fn()} onActivateFolder={vi.fn()} onChangeCwd={onChangeCwd} />)
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh tree' }).hasAttribute('disabled')).toBe(false))
 

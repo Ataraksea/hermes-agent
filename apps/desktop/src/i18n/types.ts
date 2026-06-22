@@ -1272,7 +1272,6 @@ export interface Translations {
     aria: string
     panelsAria: string
     files: string
-    kanban: string
     terminal: string
     noFolderSelected: string
     changeCwdTitle: string
@@ -1298,25 +1297,6 @@ export interface Translations {
     loadingFiles: string
     terminalHide: string
     addToChat: string
-    kanbanPanel: {
-      title: string
-      refresh: string
-      loading: string
-      loadFailed: string
-      noBoardsTitle: string
-      noBoardsBody: string
-      noTasksTitle: string
-      noTasksBody: string
-      emptyBadge: string
-      details: string
-      workspace: string
-      created: string
-      branch: string
-      workflow: string
-      notSet: string
-      unknownStatus: string
-      statusCount: (status: string, count: number) => string
-    }
   }
 
   preview: {

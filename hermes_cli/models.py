@@ -506,19 +506,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "deepseek/deepseek-r1-0528",
         "qwen/qwen3-235b-a22b-fp8",
     ],
-        "vertex": [
-        "gemini-3.5-flash",
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite",
-        "gemini-3.1-flash-lite-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash-001",
-        "gemini-2.0-flash-lite-001",
-    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -1046,7 +1033,6 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
     ProviderEntry("opencode-zen",   "OpenCode Zen",             "OpenCode Zen (Curated models, pay-as-you-go)"),
     ProviderEntry("opencode-go",    "OpenCode Go",              "OpenCode Go (Open models subscription)"),
     ProviderEntry("bedrock",        "AWS Bedrock",              "AWS Bedrock (Claude, Nova, Llama, DeepSeek; IAM or API key)"),
-    ProviderEntry("vertex",         "Google Vertex AI",         "Google Vertex AI (Enterprise Gemini models via GCP)"),
     ProviderEntry("azure-foundry",  "Azure Foundry",            "Azure Foundry (OpenAI-style or Anthropic-style endpoint, your Azure AI deployment)"),
     ProviderEntry("qwen-oauth",     "Qwen OAuth (Portal)",      "Qwen OAuth (Reuses local Qwen CLI login)"),
 ]
@@ -1253,8 +1239,6 @@ _PROVIDER_ALIASES = {
     "lm_studio": "lmstudio",
     "ollama": "custom",  # bare "ollama" = local; use "ollama-cloud" for cloud
     "ollama_cloud": "ollama-cloud",
-    "vertex-ai": "vertex",
-    "google-vertex": "vertex",
 }
 
 
@@ -3660,12 +3644,6 @@ def validate_requested_model(
             requested,
             api_key=api_key,
         ) or requested
-    elif normalized == "vertex" and requested_for_lookup.startswith("google/"):
-        # Vertex's OpenAPI endpoint requires the google/ publisher prefix on
-        # the wire, but our curated catalog is keyed by bare model name.
-        # Strip it before catalog lookup so users don't get a spurious
-        # "model not found" warning at session start.
-        requested_for_lookup = requested_for_lookup[len("google/"):]
 
     if not requested:
         return {

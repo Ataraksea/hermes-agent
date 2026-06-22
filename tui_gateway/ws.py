@@ -75,11 +75,6 @@ class WSTransport:
         self._loop = loop
         self._peer = peer
         self._closed = False
-        # Starlette WebSocket sends are not a safe free-for-all: long foreground
-        # tasks can emit frames from several worker paths while the uvicorn loop
-        # is catching up. Serialize writes per socket so reconnect/log spam under
-        # high-output tasks is not amplified by overlapping send_text() calls.
-        self._send_lock = asyncio.Lock()
 
     def write(self, obj: dict) -> bool:
         if self._closed:
@@ -135,10 +130,7 @@ class WSTransport:
 
     async def _safe_send(self, line: str) -> None:
         try:
-            async with self._send_lock:
-                if self._closed:
-                    return
-                await self._ws.send_text(line)
+            await self._ws.send_text(line)
         except Exception as exc:
             self._closed = True
             _log.warning(

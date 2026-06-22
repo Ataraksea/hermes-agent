@@ -143,17 +143,3 @@ def make_restart_runner(
     platform_adapter.set_busy_session_handler(runner._handle_active_session_busy_message)
     runner.adapters = {Platform.TELEGRAM: platform_adapter}
     return runner, platform_adapter
-
-
-def mask_dev_container_sandbox(monkeypatch):
-    """Hide /.dockerenv in Cursor/WSL dev sandboxes for restart-path tests."""
-    import os
-
-    real_exists = os.path.exists
-
-    def fake_exists(path):
-        if path in ("/.dockerenv", "/run/.containerenv"):
-            return False
-        return real_exists(path)
-
-    monkeypatch.setattr("gateway.run.os.path.exists", fake_exists)

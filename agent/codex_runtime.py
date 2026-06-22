@@ -683,7 +683,6 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
 
         stream_kwargs = dict(api_kwargs)
         stream_kwargs["stream"] = True
-        stream_kwargs.setdefault("text",{"format": {"type": "text"},"verbosity": "high"})
 
         try:
             event_stream = active_client.responses.create(**stream_kwargs)

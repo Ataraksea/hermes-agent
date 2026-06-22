@@ -1635,7 +1635,6 @@ export const en: Translations = {
     aria: 'Right sidebar',
     panelsAria: 'Right sidebar panels',
     files: 'File system',
-    kanban: 'Kanban',
     terminal: 'Terminal',
     noFolderSelected: 'No folder selected',
     changeCwdTitle: 'Change working directory',
@@ -1660,26 +1659,7 @@ export const en: Translations = {
     loadingTree: 'Loading file tree',
     loadingFiles: 'Loading files',
     terminalHide: 'Hide terminal',
-    addToChat: 'Add to chat',
-    kanbanPanel: {
-      title: 'Kanban',
-      refresh: 'Refresh board',
-      loading: 'Loading Kanban board',
-      loadFailed: 'Kanban unavailable',
-      noBoardsTitle: 'No boards',
-      noBoardsBody: 'Create a board with `hermes kanban boards create <slug>` to see it here.',
-      noTasksTitle: 'No tasks',
-      noTasksBody: 'This board does not have any visible tasks yet.',
-      emptyBadge: 'No tasks',
-      details: 'Task details',
-      workspace: 'Workspace',
-      created: 'Created',
-      branch: 'Branch',
-      workflow: 'Workflow',
-      notSet: 'Not set',
-      unknownStatus: 'unknown',
-      statusCount: (status: string, count: number) => `${count} ${status}`
-    }
+    addToChat: 'Add to chat'
   },
 
   preview: {

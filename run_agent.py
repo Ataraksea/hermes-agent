@@ -15,7 +15,7 @@ Features:
 
 Usage:
     from run_agent import AIAgent
-
+    
     agent = AIAgent(base_url="http://localhost:30000/v1", model="claude-opus-4-20250514")
     response = agent.run_conversation("Tell me about the latest Python updates")
 """
@@ -37,14 +37,13 @@ import copy
 import hashlib
 import json
 import logging
-
 logger = logging.getLogger(__name__)
 import os
 import re
 import sys
 import tempfile
-import threading
 import time
+import threading
 import uuid
 from typing import List, Dict, Any, Optional, Callable
 # NOTE: `from openai import OpenAI` is deliberately NOT at module top — the
@@ -61,15 +60,9 @@ from typing import List, Dict, Any, Optional, Callable
 # ModuleNotFoundError on broken/partial installs where `fire` isn't present.
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 from types import SimpleNamespace
 
 from hermes_constants import get_hermes_home
-
-from agent.tool_dispatch_helpers import (
-    _is_multimodal_tool_result,
-    _multimodal_text_summary
-)
 
 
 def _launch_cwd_for_session(source: str) -> Optional[str]:
@@ -115,12 +108,14 @@ def _session_source_for_agent(platform: Optional[str]) -> str:
 # `mock.patch("run_agent.<X>")`, `from run_agent import <X>` in production
 # siblings, or the `_ra().<X>` indirection in agent/system_prompt.py — none
 # of which ruff's in-module usage scan can see.
-from agent.iteration_budget import IterationBudget
 from agent.process_bootstrap import (
     OpenAI,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.OpenAI")
-    _get_proxy_for_base_url,
     _SafeWriter,  # noqa: F401  # re-exported for tests that `from run_agent import _SafeWriter`
+    _get_proxy_for_base_url,
 )
+from agent.iteration_budget import IterationBudget
+
+
 from hermes_cli.env_loader import load_hermes_dotenv
 from hermes_cli.timeouts import (
     get_provider_request_timeout,
@@ -138,53 +133,35 @@ else:
 
 
 # Import our tool system
-from agent.codex_responses_adapter import (
-    _derive_responses_function_call_id as _codex_derive_responses_function_call_id,
+from model_tools import (
+    get_tool_definitions,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.get_tool_definitions")
+    get_toolset_for_tool,
+    handle_function_call,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.handle_function_call")
+    check_toolset_requirements,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.check_toolset_requirements")
 )
-from agent.codex_responses_adapter import (
-    _deterministic_call_id as _codex_deterministic_call_id,
-)
-from agent.codex_responses_adapter import (
-    _split_responses_tool_id as _codex_split_responses_tool_id,
-)
-from agent.codex_responses_adapter import (
-    _summarize_user_message_for_log,  # noqa: F401  # re-exported for tests
-)
-
-# Re-exported for tests that monkeypatch these symbols on run_agent.
-from agent.context_compressor import ContextCompressor  # noqa: F401
-from agent.error_classifier import FailoverReason
-
 from tools.terminal_tool import cleanup_vm
 from tools.interrupt import set_interrupt as _set_interrupt
 from tools.browser_tool import cleanup_browser
 
+
 # Agent internals extracted to agent/ package for modularity
 from agent.memory_manager import sanitize_context
-from agent.message_sanitization import (  # noqa: F401
-    _SURROGATE_RE,
-    _escape_invalid_chars_in_json_strings,
-    _repair_tool_call_arguments,
-    _sanitize_messages_non_ascii,
-    _sanitize_messages_surrogates,
-    _sanitize_structure_non_ascii,
-    _sanitize_structure_surrogates,
-    _sanitize_surrogates,
-    _sanitize_tools_non_ascii,
-    _strip_images_from_messages,
-    _strip_non_ascii,
-)
+from agent.error_classifier import FailoverReason
+from agent.redact import redact_sensitive_text
 from agent.model_metadata import (
     estimate_request_tokens_rough,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.estimate_request_tokens_rough")
     is_local_endpoint,
 )
-from agent.process_bootstrap import _get_proxy_from_env  # noqa: F401
+from agent.usage_pricing import normalize_usage
+# Re-exported for tests that monkeypatch these symbols on run_agent.
+from agent.context_compressor import ContextCompressor  # noqa: F401
+from agent.retry_utils import jittered_backoff  # noqa: F401
 from agent.prompt_builder import (  # noqa: F401  # re-exported via _ra() / mock.patch("run_agent.<name>") / from run_agent import <name>
     DEFAULT_AGENT_IDENTITY,
+    build_skills_system_prompt,
     build_context_files_prompt,
     build_environment_hints,
     build_nous_subscription_prompt,
-    build_skills_system_prompt,
     load_soul_md,
 )
 from agent.process_bootstrap import _get_proxy_from_env  # noqa: F401
@@ -214,22 +191,23 @@ from agent.tool_guardrails import (
 )
 from agent.tool_result_classification import (
     FILE_MUTATING_TOOL_NAMES as _FILE_MUTATING_TOOLS,
-)
-from agent.tool_result_classification import (
     file_mutation_result_landed,
 )
 from agent.trajectory import (
     convert_scratchpad_to_think,
-)
-from agent.trajectory import (
     save_trajectory as _save_trajectory_to_file,
 )
-from agent.usage_pricing import normalize_usage
-from model_tools import (
-    check_toolset_requirements,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.check_toolset_requirements")
-    get_tool_definitions,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.get_tool_definitions")
-    get_toolset_for_tool,
-    handle_function_call,  # noqa: F401  # re-exported for tests that mock.patch("run_agent.handle_function_call")
+from agent.tool_dispatch_helpers import (
+    _should_parallelize_tool_batch,
+    _is_destructive_command,  # noqa: F401  # re-exported for tests that access `run_agent._is_destructive_command`
+    _extract_parallel_scope_path,  # noqa: F401  # re-exported for tests that `from run_agent import _extract_parallel_scope_path`
+    _paths_overlap,  # noqa: F401  # re-exported for tests that `from run_agent import _paths_overlap`
+    _is_multimodal_tool_result,
+    _multimodal_text_summary,
+    _append_subdir_hint_to_multimodal,  # noqa: F401  # re-exported for tests that `from run_agent import _append_subdir_hint_to_multimodal`
+    _extract_file_mutation_targets,
+    _extract_error_preview,
+    _trajectory_normalize_msg,  # noqa: F401  # re-exported for tests that `from run_agent import _trajectory_normalize_msg`
 )
 from utils import atomic_json_write, base_url_host_matches, base_url_hostname, env_float, is_truthy_value, model_forces_max_completion_tokens
 
@@ -263,42 +241,6 @@ def _routermint_headers() -> dict:
     return {
         "User-Agent": f"HermesAgent/{_HERMES_VERSION}",
     }
-
-def _normalize_fallback_chain_config(fallback_model: Any) -> List[Dict[str, Any]]:
-    """Normalize fallback_model/fallback_providers config into provider/model dicts.
-
-    Supports the canonical dict form::
-
-        {"provider": "google-gemini-cli", "model": "gemini-3-flash-preview"}
-
-    and the compact CLI/YAML form::
-
-        "google-gemini-cli:gemini-3-flash-preview"
-
-    Invalid entries are ignored so a bad fallback does not break startup.
-    """
-    entries = fallback_model if isinstance(fallback_model, list) else [fallback_model]
-    chain: List[Dict[str, Any]] = []
-    for entry in entries:
-        if isinstance(entry, dict):
-            provider = str(entry.get("provider") or "").strip()
-            model = str(entry.get("model") or "").strip()
-            if provider and model:
-                normalized = dict(entry)
-                normalized["provider"] = provider
-                normalized["model"] = model
-                chain.append(normalized)
-            continue
-        if isinstance(entry, str):
-            raw = entry.strip()
-            if not raw or ":" not in raw:
-                continue
-            provider, model = raw.split(":", 1)
-            provider = provider.strip()
-            model = model.strip()
-            if provider and model:
-                chain.append({"provider": provider, "model": model})
-    return chain
 
 
 def _pool_may_recover_from_rate_limit(
@@ -679,7 +621,7 @@ class AIAgent:
         carry_over_context: bool = False,
     ):
         """Reset all session-scoped token counters to 0 for a fresh session.
-
+        
         This method encapsulates the reset logic for all session-level metrics
         including:
         - Token usage counters (input, output, total, prompt, completion)
@@ -688,7 +630,7 @@ class AIAgent:
         - Reasoning tokens
         - Estimated cost tracking
         - Context compressor internal counters
-
+        
         The method safely handles optional attributes (e.g., context compressor)
         using ``hasattr`` checks.
 
@@ -711,7 +653,7 @@ class AIAgent:
         self.session_estimated_cost_usd = 0.0
         self.session_cost_status = "unknown"
         self.session_cost_source = "none"
-
+        
         # Turn counter (added after reset_session_state was first written — #2635)
         self._user_turn_count = 0
 
@@ -1475,9 +1417,9 @@ class AIAgent:
     # Background memory/skill review — prompts live in agent.background_review
     # ------------------------------------------------------------------
     from agent.background_review import (
-        _COMBINED_REVIEW_PROMPT,
         _MEMORY_REVIEW_PROMPT,
         _SKILL_REVIEW_PROMPT,
+        _COMBINED_REVIEW_PROMPT,
     )
 
     @staticmethod
@@ -1733,31 +1675,31 @@ class AIAgent:
     def _get_messages_up_to_last_assistant(self, messages: List[Dict]) -> List[Dict]:
         """
         Get messages up to (but not including) the last assistant turn.
-
+        
         This is used when we need to "roll back" to the last successful point
         in the conversation, typically when the final assistant message is
         incomplete or malformed.
-
+        
         Args:
             messages: Full message list
-
+            
         Returns:
             Messages up to the last complete assistant turn (ending with user/tool message)
         """
         if not messages:
             return []
-
+        
         # Find the index of the last assistant message
         last_assistant_idx = None
         for i in range(len(messages) - 1, -1, -1):
             if messages[i].get("role") == "assistant":
                 last_assistant_idx = i
                 break
-
+        
         if last_assistant_idx is None:
             # No assistant message found, return all messages
             return messages.copy()
-
+        
         # Return everything up to (not including) the last assistant message
         return messages[:last_assistant_idx]
 
@@ -1774,7 +1716,7 @@ class AIAgent:
     def _save_trajectory(self, messages: List[Dict[str, Any]], user_query: str, completed: bool):
         """
         Save conversation trajectory to JSONL file.
-
+        
         Args:
             messages (List[Dict]): Complete message history
             user_query (str): Original user query
@@ -1782,7 +1724,7 @@ class AIAgent:
         """
         if not self.save_trajectories:
             return
-
+        
         trajectory = self._convert_to_trajectory_format(messages, user_query, completed)
         _save_trajectory_to_file(trajectory, self.model, completed)
 
@@ -2001,27 +1943,27 @@ class AIAgent:
     def _clean_error_message(self, error_msg: str) -> str:
         """
         Clean up error messages for user display, removing HTML content and truncating.
-
+        
         Args:
             error_msg: Raw error message from API or exception
-
+            
         Returns:
             Clean, user-friendly error message
         """
         if not error_msg:
             return "Unknown error"
-
+            
         # Remove HTML content (common with CloudFlare and gateway error pages)
         if error_msg.strip().startswith('<!DOCTYPE html') or '<html' in error_msg:
             return "Service temporarily unavailable (HTML error page returned)"
-
+            
         # Remove newlines and excessive whitespace
         cleaned = ' '.join(error_msg.split())
-
+        
         # Truncate if too long
         if len(cleaned) > 150:
             cleaned = cleaned[:150] + "..."
-
+            
         return cleaned
 
     @staticmethod
@@ -2434,22 +2376,22 @@ class AIAgent:
     def interrupt(self, message: str = None) -> None:
         """
         Request the agent to interrupt its current tool-calling loop.
-
+        
         Call this from another thread (e.g., input handler, message receiver)
         to gracefully stop the agent and process a new message.
-
+        
         Also signals long-running tool executions (e.g. terminal commands)
         to terminate early, so the agent can respond immediately.
-
+        
         Args:
             message: Optional new message that triggered the interrupt.
                      If provided, the agent will include this in its response context.
-
+        
         Example (CLI):
             # In a separate input thread:
             if user_typed_something:
                 agent.interrupt(user_input)
-
+        
         Example (Messaging):
             # When new message arrives for active session:
             if session_has_running_agent:
@@ -3187,11 +3129,10 @@ class AIAgent:
                 response_text,
                 **sync_kwargs,
             )
-            if not self._memory_sync_recall:
-                self._memory_manager.queue_prefetch_all(
-                    user_text,
-                    session_id=self.session_id or "",
-                )
+            self._memory_manager.queue_prefetch_all(
+                user_text,
+                session_id=self.session_id or "",
+            )
         except Exception:
             pass
 
@@ -3328,7 +3269,7 @@ class AIAgent:
     def _hydrate_todo_store(self, history: List[Dict[str, Any]]) -> None:
         """
         Recover todo state from conversation history.
-
+        
         The gateway creates a fresh AIAgent per message, so the in-memory
         TodoStore is empty. We scan the history for the most recent todo
         tool response and replay it to reconstruct the state.
@@ -3349,7 +3290,7 @@ class AIAgent:
                     break
             except (json.JSONDecodeError, TypeError):
                 continue
-
+        
         if last_todo_response:
             # Replay the items into the store (replace mode)
             self._todo_store.write(last_todo_response, merge=False)
@@ -3629,9 +3570,8 @@ class AIAgent:
     @staticmethod
     def _build_keepalive_http_client(base_url: str = "") -> Any:
         try:
-            import socket as _socket
-
             import httpx as _httpx
+            import socket as _socket
 
             if "api.githubcopilot.com" in str(base_url or "").lower():
                 return _httpx.Client()
@@ -3993,7 +3933,7 @@ class AIAgent:
             return False
 
         try:
-            from agent.anthropic_adapter import build_anthropic_client, resolve_anthropic_token
+            from agent.anthropic_adapter import resolve_anthropic_token, build_anthropic_client
 
             new_token = resolve_anthropic_token()
         except Exception as exc:
@@ -4110,7 +4050,7 @@ class AIAgent:
         runtime_base = getattr(entry, "runtime_base_url", None) or getattr(entry, "base_url", None) or self.base_url
 
         if self.api_mode == "anthropic_messages":
-            from agent.anthropic_adapter import _is_oauth_token, build_anthropic_client
+            from agent.anthropic_adapter import build_anthropic_client, _is_oauth_token
 
             try:
                 self._anthropic_client.close()
@@ -4515,8 +4455,8 @@ class AIAgent:
         misclassified as non-vision and have their images stripped.
         """
         try:
-            from agent.image_routing import _lookup_supports_vision
             from hermes_cli.config import load_config
+            from agent.image_routing import _lookup_supports_vision
             cfg = load_config()
             provider = (getattr(self, "provider", "") or "").strip()
             model = (getattr(self, "model", "") or "").strip()
@@ -5447,25 +5387,25 @@ def main(
     """
     print("🤖 AI Agent with Tool Calling")
     print("=" * 50)
-
+    
     # Handle tool listing
     if list_tools:
         from model_tools import get_all_tool_names, get_available_toolsets
         from toolsets import get_all_toolsets, get_toolset_info
-
+        
         print("📋 Available Tools & Toolsets:")
         print("-" * 50)
-
+        
         # Show new toolsets system
         print("\n🎯 Predefined Toolsets (New System):")
         print("-" * 40)
         all_toolsets = get_all_toolsets()
-
+        
         # Group by category
         basic_toolsets = []
         composite_toolsets = []
         scenario_toolsets = []
-
+        
         for name, toolset in all_toolsets.items():
             info = get_toolset_info(name)
             if info:
@@ -5476,14 +5416,14 @@ def main(
                     composite_toolsets.append(entry)
                 else:
                     scenario_toolsets.append(entry)
-
+        
         # Print basic toolsets
         print("\n📌 Basic Toolsets:")
         for name, info in basic_toolsets:
             tools_str = ', '.join(info['resolved_tools']) if info['resolved_tools'] else 'none'
             print(f"  • {name:15} - {info['description']}")
             print(f"    Tools: {tools_str}")
-
+        
         # Print composite toolsets
         print("\n📂 Composite Toolsets (built from other toolsets):")
         for name, info in composite_toolsets:
@@ -5491,14 +5431,14 @@ def main(
             print(f"  • {name:15} - {info['description']}")
             print(f"    Includes: {includes_str}")
             print(f"    Total tools: {info['tool_count']}")
-
+        
         # Print scenario-specific toolsets
         print("\n🎭 Scenario-Specific Toolsets:")
         for name, info in scenario_toolsets:
             print(f"  • {name:20} - {info['description']}")
             print(f"    Total tools: {info['tool_count']}")
-
-
+        
+        
         # Show legacy toolset compatibility
         print("\n📦 Legacy Toolsets (for backward compatibility):")
         legacy_toolsets = get_available_toolsets()
@@ -5507,14 +5447,14 @@ def main(
             print(f"  {status} {name}: {info['description']}")
             if not info["available"]:
                 print(f"    Requirements: {', '.join(info['requirements'])}")
-
+        
         # Show individual tools
         all_tools = get_all_tool_names()
         print(f"\n🔧 Individual Tools ({len(all_tools)} available):")
         for tool_name in sorted(all_tools):
             toolset = get_toolset_for_tool(tool_name)
             print(f"  📌 {tool_name} (from {toolset})")
-
+        
         print("\n💡 Usage Examples:")
         print("  # Use predefined toolsets")
         print("  python run_agent.py --enabled_toolsets=research --query='search for Python news'")
@@ -5530,24 +5470,24 @@ def main(
         print("  # Run with trajectory saving enabled")
         print("  python run_agent.py --save_trajectories --query='your question here'")
         return
-
+    
     # Parse toolset selection arguments
     enabled_toolsets_list = None
     disabled_toolsets_list = None
-
+    
     if enabled_toolsets:
         enabled_toolsets_list = [t.strip() for t in enabled_toolsets.split(",")]
         print(f"🎯 Enabled toolsets: {enabled_toolsets_list}")
-
+    
     if disabled_toolsets:
         disabled_toolsets_list = [t.strip() for t in disabled_toolsets.split(",")]
         print(f"🚫 Disabled toolsets: {disabled_toolsets_list}")
-
+    
     if save_trajectories:
         print("💾 Trajectory saving: ENABLED")
         print("   - Successful conversations → trajectory_samples.jsonl")
         print("   - Failed conversations → failed_trajectories.jsonl")
-
+    
     # Initialize agent with provided parameters
     try:
         agent = AIAgent(
@@ -5564,7 +5504,7 @@ def main(
     except RuntimeError as e:
         print(f"❌ Failed to initialize agent: {e}")
         return
-
+    
     # Use provided query or default to Python 3.13 example
     if query is None:
         user_query = (
@@ -5573,37 +5513,37 @@ def main(
         )
     else:
         user_query = query
-
+    
     print(f"\n📝 User Query: {user_query}")
     print("\n" + "=" * 50)
-
+    
     # Run conversation
     result = agent.run_conversation(user_query)
-
+    
     print("\n" + "=" * 50)
     print("📋 CONVERSATION SUMMARY")
     print("=" * 50)
     print(f"✅ Completed: {result['completed']}")
     print(f"📞 API Calls: {result['api_calls']}")
     print(f"💬 Messages: {len(result['messages'])}")
-
+    
     if result['final_response']:
         print("\n🎯 FINAL RESPONSE:")
         print("-" * 30)
         print(result['final_response'])
-
+    
     # Save sample trajectory to UUID-named file if requested
     if save_sample:
         sample_id = str(uuid.uuid4())[:8]
         sample_filename = f"sample_{sample_id}.json"
-
+        
         # Convert messages to trajectory format (same as batch_runner)
         trajectory = agent._convert_to_trajectory_format(
-            result['messages'],
-            user_query,
+            result['messages'], 
+            user_query, 
             result['completed']
         )
-
+        
         entry = {
             "conversations": trajectory,
             "timestamp": datetime.now().isoformat(),
@@ -5611,7 +5551,7 @@ def main(
             "completed": result['completed'],
             "query": user_query
         }
-
+        
         try:
             with open(sample_filename, "w", encoding="utf-8") as f:
                 # Pretty-print JSON with indent for readability
@@ -5619,7 +5559,7 @@ def main(
             print(f"\n💾 Sample trajectory saved to: {sample_filename}")
         except Exception as e:
             print(f"\n⚠️ Failed to save sample: {e}")
-
+    
     print("\n👋 Agent execution completed!")
 
 

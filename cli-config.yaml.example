@@ -9,7 +9,7 @@ model:
   # Default model to use (can be overridden with --model flag)
   # Both "default" and "model" work as the key name here.
   default: "anthropic/claude-opus-4.6"
-
+  
   # Inference provider selection:
   #   "auto"         - Auto-detect from credentials (default)
   #   "openrouter"   - OpenRouter (requires: OPENROUTER_API_KEY or OPENAI_API_KEY)
@@ -40,7 +40,7 @@ model:
   #
   # Can also be overridden for a single invocation with the --provider flag.
   provider: "auto"
-
+  
   # API configuration (falls back to OPENROUTER_API_KEY env var)
   # api_key: "your-key-here"  # Uncomment to set here instead of .env
   base_url: "https://openrouter.ai/api/v1"
@@ -387,11 +387,11 @@ compression:
   # Enable automatic context compression (default: true)
   # Set to false if you prefer to manage context manually or want errors on overflow
   enabled: true
-
+  
   # Trigger compression at this % of model's context limit (default: 0.50 = 50%)
   # Lower values = more aggressive compression, higher values = compress later
   threshold: 0.50
-
+  
   # Fraction of the threshold to preserve as recent tail (default: 0.20 = 20%)
   # e.g. 20% of 50% threshold = 10% of total context kept as recent messages.
   # Summary output is separately capped at 12K tokens (Gemini output limit).
@@ -512,10 +512,10 @@ prompt_caching:
 memory:
   # Agent's personal notes: environment facts, conventions, things learned
   memory_enabled: true
-
+  
   # User profile: preferences, communication style, expectations
   user_profile_enabled: true
-
+  
   # Character limits (~2.75 chars per token, model-independent)
   memory_char_limit: 2200   # ~800 tokens
   user_char_limit: 1375     # ~500 tokens
@@ -637,15 +637,15 @@ agent:
   # primaries (default 3). The OpenAI SDK does its own low-level retries
   # underneath this wrapper — this is the Hermes-level loop.
   # api_max_retries: 3
-
+  
   # Enable verbose logging
   verbose: false
-
+  
   # Reasoning effort level (OpenRouter and Nous Portal)
   # Controls how much "thinking" the model does before responding.
   # Options: "xhigh" (max), "high", "medium", "low", "minimal", "none" (disable)
   reasoning_effort: "medium"
-
+  
   # Predefined personalities (use with /personality command)
   personalities:
     helpful: "You are a helpful, friendly AI assistant."

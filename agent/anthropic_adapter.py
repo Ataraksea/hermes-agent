@@ -790,29 +790,16 @@ def build_anthropic_client(
         # not use Anthropic's sk-ant-api prefix and would otherwise be misread as
         # Anthropic OAuth/setup tokens.
         kwargs["auth_token"] = api_key
-        default_headers: dict[str, str] = {}
         if common_betas:
-            default_headers["anthropic-beta"] = ",".join(common_betas)
-        if default_headers:
-            kwargs["default_headers"] = default_headers
+            kwargs["default_headers"] = {"anthropic-beta": ",".join(common_betas)}
     elif _is_third_party_anthropic_endpoint(base_url):
         # Third-party proxies (Microsoft Foundry, AWS Bedrock, etc.) use their
         # own API keys with x-api-key auth. Skip OAuth detection — their keys
         # don't follow Anthropic's sk-ant-* prefix convention and would be
         # misclassified as OAuth tokens.
         kwargs["api_key"] = api_key
-        if base_url_host_matches(normalized_base_url, "opencode.ai"):
-            # opencode.ai sits behind Cloudflare. The Anthropic SDK's default
-            # Python-urllib User-Agent is blocked with HTTP 403 "error code:
-            # 1010" before the request reaches the inference backend. The
-            # hermes-cli UA is whitelisted by the WAF.
-            kwargs["default_headers"] = {
-                "User-Agent": "hermes-cli/0.1 (+https://github.com/NousResearch/hermes-agent)"
-            }
         if common_betas:
-            _headers = dict(kwargs.get("default_headers", {}) or {})
-            _headers["anthropic-beta"] = ",".join(common_betas)
-            kwargs["default_headers"] = _headers
+            kwargs["default_headers"] = {"anthropic-beta": ",".join(common_betas)}
     elif _is_oauth_token(api_key):
         # OAuth access token / setup-token → Bearer auth + Claude Code identity.
         # Anthropic routes OAuth requests based on user-agent and headers;
@@ -829,13 +816,6 @@ def build_anthropic_client(
         kwargs["api_key"] = api_key
         if common_betas:
             kwargs["default_headers"] = {"anthropic-beta": ",".join(common_betas)}
-
-
-    _anthropic_workspace_id = os.getenv("ANTHROPIC_WORKSPACE_ID", "").strip()
-    if _anthropic_workspace_id:
-        existing = kwargs.get("default_headers", {})
-        new = {"anthropic-workspace-id": _anthropic_workspace_id}
-        kwargs["default_headers"] = {**existing, **new}
 
     return _anthropic_sdk.Anthropic(**kwargs)
 

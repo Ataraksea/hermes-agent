@@ -3099,8 +3099,6 @@ def select_provider_and_model(args=None):
         _model_flow_stepfun(config, current_model)
     elif selected_provider == "bedrock":
         _model_flow_bedrock(config, current_model)
-    elif selected_provider == "vertex":
-        _model_flow_vertex(config, current_model)
     elif selected_provider == "azure-foundry":
         _model_flow_azure_foundry(config, current_model)
     elif selected_provider in {
@@ -3838,196 +3836,6 @@ def _remove_custom_provider(config):
     print(f'✅ Removed "{removed_name}" from custom providers.')
 
 
-def _model_flow_named_custom(config, provider_info):
-    """Handle a named custom provider from config.yaml custom_providers list.
-
-    Always probes the endpoint's /models API to let the user pick a model.
-    If a model was previously saved, it is pre-selected in the menu.
-    Falls back to the saved model if probing fails.
-    """
-    from hermes_cli.auth import _save_model_choice, deactivate_provider
-    from hermes_cli.config import load_config, save_config
-    from hermes_cli.models import fetch_api_models
-
-    name = provider_info["name"]
-    base_url = provider_info["base_url"]
-    api_mode = provider_info.get("api_mode", "")
-    api_key = provider_info.get("api_key", "")
-    key_env = provider_info.get("key_env", "")
-    saved_model = provider_info.get("model", "")
-    provider_key = (provider_info.get("provider_key") or "").strip()
-
-    # Resolve key from env var if api_key not set directly
-    if not api_key and key_env:
-        api_key = os.environ.get(key_env, "")
-    config_api_key = _custom_provider_api_key_config_value(provider_info, api_key)
-
-    # Honor ``discover_models: false`` (default True) — when discovery is
-    # disabled, use the configured ``models:`` list verbatim and skip the
-    # live /models probe. This lets operators restrict the picker to the
-    # subset their plan actually serves instead of the endpoint's full
-    # catalog (#18726: Baidu Qianfan returns 100+ models for a 2-3 model
-    # plan). Same semantics as the slash-command picker (model_switch.py
-    # sections 3 & 4): default discovers, false keeps the explicit list.
-    discover = provider_info.get("discover_models", True)
-    if isinstance(discover, str):
-        discover = discover.lower() not in {"false", "no", "0"}
-    configured_models: list[str] = []
-    cfg_models = provider_info.get("models", {})
-    if isinstance(cfg_models, dict):
-        configured_models = [str(m) for m in cfg_models if str(m).strip()]
-    elif isinstance(cfg_models, list):
-        configured_models = [
-            str(m) for m in cfg_models if isinstance(m, str) and m.strip()
-        ]
-
-    print(f"  Provider: {name}")
-    print(f"  URL:      {base_url}")
-    if saved_model:
-        print(f"  Current:  {saved_model}")
-    print()
-
-    if not discover and configured_models:
-        # Discovery disabled with an explicit list — use it verbatim, no probe.
-        print(f"Using configured models (discover_models: false): {len(configured_models)}")
-        models = configured_models
-    else:
-        print("Fetching available models...")
-        fetch_kwargs = {"timeout": 8.0}
-        if api_mode:
-            fetch_kwargs["api_mode"] = api_mode
-        models = fetch_api_models(api_key, base_url, **fetch_kwargs)
-        # If the probe came back empty but the operator configured an explicit
-        # list, fall back to it rather than forcing manual entry.
-        if not models and configured_models:
-            models = configured_models
-
-    if models:
-        default_idx = 0
-        if saved_model and saved_model in models:
-            default_idx = models.index(saved_model)
-
-        print(f"Found {len(models)} model(s):\n")
-        try:
-            from hermes_cli.curses_ui import curses_radiolist
-
-            menu_items = [
-                f"{m} (current)" if m == saved_model else m for m in models
-            ] + ["Cancel"]
-            idx = curses_radiolist(
-                f"Select model from {name}:",
-                menu_items,
-                selected=default_idx,
-                cancel_returns=-1,
-                searchable=True,
-            )
-            print()
-            if idx < 0 or idx >= len(models):
-                print("Cancelled.")
-                return
-            model_name = models[idx]
-        except (ImportError, NotImplementedError, OSError, subprocess.SubprocessError):
-            for i, m in enumerate(models, 1):
-                suffix = " (current)" if m == saved_model else ""
-                print(f"  {i}. {m}{suffix}")
-            print(f"  {len(models) + 1}. Cancel")
-            print()
-            try:
-                val = input(f"Choice [1-{len(models) + 1}]: ").strip()
-                if not val:
-                    print("Cancelled.")
-                    return
-                idx = int(val) - 1
-                if idx < 0 or idx >= len(models):
-                    print("Cancelled.")
-                    return
-                model_name = models[idx]
-            except (ValueError, KeyboardInterrupt, EOFError):
-                print("\nCancelled.")
-                return
-    elif saved_model:
-        print("Could not fetch models from endpoint.")
-        try:
-            model_name = input(f"Model name [{saved_model}]: ").strip() or saved_model
-        except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
-            return
-    else:
-        print("Could not fetch models from endpoint. Enter model name manually.")
-        try:
-            model_name = input("Model name: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
-            return
-        if not model_name:
-            print("No model specified. Cancelled.")
-            return
-
-    # Activate and save the model to the custom_providers entry
-    _save_model_choice(model_name)
-
-    cfg = load_config()
-    model = cfg.get("model")
-    if not isinstance(model, dict):
-        model = {"default": model} if model else {}
-        cfg["model"] = model
-    if provider_key:
-        model["provider"] = provider_key
-        model.pop("base_url", None)
-        model.pop("api_key", None)
-    else:
-        model["provider"] = "custom"
-        model["base_url"] = _custom_provider_base_url_config_value(
-            provider_info, base_url
-        )
-        if config_api_key:
-            model["api_key"] = config_api_key
-    # Apply api_mode from custom_providers entry, or clear stale value
-    custom_api_mode = provider_info.get("api_mode", "")
-    if custom_api_mode:
-        model["api_mode"] = custom_api_mode
-    else:
-        model.pop("api_mode", None)  # let runtime auto-detect from URL
-    save_config(cfg)
-    deactivate_provider()
-
-    # Persist the selected model back to whichever schema owns this endpoint.
-    if provider_key:
-        cfg = load_config()
-        providers_cfg = cfg.get("providers")
-        if isinstance(providers_cfg, dict):
-            provider_entry = providers_cfg.get(provider_key)
-            if isinstance(provider_entry, dict):
-                provider_entry["default_model"] = model_name
-                # Only persist an inline api_key when the user originally had
-                # one (either a literal secret or a ``${VAR}`` template). When
-                # the entry relies on ``key_env``, do not synthesize a
-                # ``${key_env}`` api_key — the runtime already resolves the
-                # key from ``key_env`` directly, and writing the resolved
-                # secret (or even a synthesized template) would silently
-                # downgrade credential hygiene on entries that intentionally
-                # keep plaintext out of ``config.yaml``. See issue #15803.
-                original_api_key_ref = str(
-                    provider_info.get("api_key_ref", "") or ""
-                ).strip()
-                original_api_key = str(provider_info.get("api_key", "") or "").strip()
-                had_inline_api_key = bool(original_api_key_ref or original_api_key)
-                if (
-                    had_inline_api_key
-                    and config_api_key
-                    and not str(provider_entry.get("api_key", "") or "").strip()
-                ):
-                    provider_entry["api_key"] = config_api_key
-                if key_env and not str(provider_entry.get("key_env", "") or "").strip():
-                    provider_entry["key_env"] = key_env
-                cfg["providers"] = providers_cfg
-                save_config(cfg)
-    else:
-        # Save model name to the custom_providers entry for next time
-        _save_custom_provider(base_url, config_api_key, model_name, api_mode=api_mode)
-
-    print(f"\n✅ Model set to: {model_name}")
-    print(f"   Provider: {name} ({base_url})")
 
 
 # Lazy-export the model catalog at module level. Tests and a handful of
@@ -4075,7 +3883,7 @@ def _prompt_reasoning_effort_selection(efforts, current_effort=""):
             str(effort).strip().lower() for effort in efforts if str(effort).strip()
         )
     )
-    canonical_order = ("minimal", "low", "medium", "high", "xhigh", "max")
+    canonical_order = ("minimal", "low", "medium", "high", "xhigh")
     ordered = [effort for effort in canonical_order if effort in deduped]
     ordered.extend(effort for effort in deduped if effort not in canonical_order)
     if not ordered:
@@ -4264,694 +4072,6 @@ def _stepfun_base_url_for_region(region: str) -> str:
 
 
 
-    region_idx = _prompt_provider_choice([label for _, label in ordered_regions])
-    if region_idx is None or ordered_regions[region_idx][0] == "cancel":
-        print("No change.")
-        return
-
-    selected_region = ordered_regions[region_idx][0]
-    effective_base = _stepfun_base_url_for_region(selected_region)
-    if base_url_env:
-        save_env_value(base_url_env, effective_base)
-
-    live_models = fetch_api_models(existing_key, effective_base)
-    if live_models:
-        model_list = live_models
-        print(f"  Found {len(model_list)} model(s) from {pconfig.name} API")
-    else:
-        model_list = _PROVIDER_MODELS.get(provider_id, [])
-        if model_list:
-            print(
-                f"  Could not auto-detect models from {pconfig.name} API — "
-                "showing Step Plan fallback catalog."
-            )
-
-    if model_list:
-        selected = _prompt_model_selection(model_list, current_model=current_model)
-    else:
-        try:
-            selected = input("Model name: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            selected = None
-
-    if selected:
-        _save_model_choice(selected)
-
-        cfg = load_config()
-        model = cfg.get("model")
-        if not isinstance(model, dict):
-            model = {"default": model} if model else {}
-            cfg["model"] = model
-        model["provider"] = provider_id
-        model["base_url"] = effective_base
-        model.pop("api_mode", None)
-        save_config(cfg)
-        deactivate_provider()
-
-        config["model"] = dict(model)
-        print(f"Default model set to: {selected} (via {pconfig.name})")
-    else:
-        print("No change.")
-
-
-def _model_flow_bedrock_api_key(config, region, current_model=""):
-    """Bedrock API Key mode — uses the OpenAI-compatible bedrock-mantle endpoint.
-
-    For developers who don't have an AWS account but received a Bedrock API Key
-    from their AWS admin. Works like any OpenAI-compatible endpoint.
-    """
-    from hermes_cli.auth import (
-        _prompt_model_selection,
-        _save_model_choice,
-        deactivate_provider,
-    )
-    from hermes_cli.config import (
-        load_config,
-        save_config,
-        get_env_value,
-        save_env_value,
-    )
-    from hermes_cli.models import _PROVIDER_MODELS
-
-    mantle_base_url = f"https://bedrock-mantle.{region}.api.aws/v1"
-
-    # Prompt for API key
-    existing_key = get_env_value("AWS_BEARER_TOKEN_BEDROCK") or ""
-    if existing_key:
-        from hermes_cli.env_loader import format_secret_source_suffix
-        source_suffix = format_secret_source_suffix("AWS_BEARER_TOKEN_BEDROCK")
-        print(f"  Bedrock API Key: {existing_key[:12]}... ✓{source_suffix}")
-    else:
-        print(f"  Endpoint: {mantle_base_url}")
-        print()
-        from hermes_cli.secret_prompt import masked_secret_prompt
-
-        try:
-            api_key = masked_secret_prompt("  Bedrock API Key: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print()
-            return
-        if not api_key:
-            print("  Cancelled.")
-            return
-        save_env_value("AWS_BEARER_TOKEN_BEDROCK", api_key)
-        existing_key = api_key
-        print("  ✓ API key saved.")
-    print()
-
-    # Model selection — use static list (mantle doesn't need boto3 for discovery)
-    model_list = _PROVIDER_MODELS.get("bedrock", [])
-    print(f"  Showing {len(model_list)} curated models")
-
-    if model_list:
-        selected = _prompt_model_selection(model_list, current_model=current_model)
-    else:
-        try:
-            selected = input("  Model ID: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            selected = None
-
-    if selected:
-        _save_model_choice(selected)
-
-        # Save as custom provider pointing to bedrock-mantle
-        cfg = load_config()
-        model = cfg.get("model")
-        if not isinstance(model, dict):
-            model = {"default": model} if model else {}
-            cfg["model"] = model
-        model["provider"] = "custom"
-        model["base_url"] = mantle_base_url
-        model.pop("api_mode", None)  # chat_completions is the default
-
-        # Also save region in bedrock config for reference
-        bedrock_cfg = cfg.get("bedrock", {})
-        if not isinstance(bedrock_cfg, dict):
-            bedrock_cfg = {}
-        bedrock_cfg["region"] = region
-        cfg["bedrock"] = bedrock_cfg
-
-        # Save the API key env var name so hermes knows where to find it
-        save_env_value("OPENAI_API_KEY", existing_key)
-        save_env_value("OPENAI_BASE_URL", mantle_base_url)
-
-        save_config(cfg)
-        deactivate_provider()
-
-        print(f"  Default model set to: {selected} (via Bedrock API Key, {region})")
-        print(f"  Endpoint: {mantle_base_url}")
-    else:
-        print("  No change.")
-
-
-def _model_flow_bedrock(config, current_model=""):
-    """AWS Bedrock provider: verify credentials, pick region, discover models.
-
-    Uses the native Converse API via boto3 — not the OpenAI-compatible endpoint.
-    Auth is handled by the AWS SDK default credential chain (env vars, profile,
-    instance role), so no API key prompt is needed.
-    """
-    from hermes_cli.auth import (
-        _prompt_model_selection,
-        _save_model_choice,
-        deactivate_provider,
-    )
-    from hermes_cli.config import load_config, save_config
-    from hermes_cli.models import _PROVIDER_MODELS
-
-    # 1. Check for AWS credentials
-    try:
-        from agent.bedrock_adapter import (
-            has_aws_credentials,
-            resolve_aws_auth_env_var,
-            resolve_bedrock_region,
-            discover_bedrock_models,
-        )
-    except ImportError:
-        print("  ✗ boto3 is not installed. Install it with:")
-        print("    pip install boto3")
-        print()
-        return
-
-    if not has_aws_credentials():
-        print("  ⚠ No AWS credentials detected via environment variables.")
-        print("  Bedrock will use boto3's default credential chain (IMDS, SSO, etc.)")
-        print()
-
-    auth_var = resolve_aws_auth_env_var()
-    if auth_var:
-        print(f"  AWS credentials: {auth_var} ✓")
-    else:
-        print("  AWS credentials: boto3 default chain (instance role / SSO)")
-    print()
-
-    # 2. Region selection
-    current_region = resolve_bedrock_region()
-    try:
-        region_input = input(f"  AWS Region [{current_region}]: ").strip()
-    except (KeyboardInterrupt, EOFError):
-        print()
-        return
-    region = region_input or current_region
-
-    # 2b. Authentication mode
-    print("  Choose authentication method:")
-    print()
-    print("    1. IAM credential chain (recommended)")
-    print("       Works with EC2 instance roles, SSO, env vars, aws configure")
-    print("    2. Bedrock API Key")
-    print("       Enter your Bedrock API Key directly — also supports")
-    print("       team scenarios where an admin distributes keys")
-    print()
-    try:
-        auth_choice = input("  Choice [1]: ").strip()
-    except (KeyboardInterrupt, EOFError):
-        print()
-        return
-
-    if auth_choice == "2":
-        _model_flow_bedrock_api_key(config, region, current_model)
-        return
-
-    # 3. Model discovery — try live API first, fall back to static list
-    print(f"  Discovering models in {region}...")
-    live_models = discover_bedrock_models(region)
-
-    if live_models:
-        _EXCLUDE_PREFIXES = (
-            "stability.",
-            "cohere.embed",
-            "twelvelabs.",
-            "us.stability.",
-            "us.cohere.embed",
-            "us.twelvelabs.",
-            "global.cohere.embed",
-            "global.twelvelabs.",
-        )
-        _EXCLUDE_SUBSTRINGS = ("safeguard", "voxtral", "palmyra-vision")
-        filtered = []
-        for m in live_models:
-            mid = m["id"]
-            if any(mid.startswith(p) for p in _EXCLUDE_PREFIXES):
-                continue
-            if any(s in mid.lower() for s in _EXCLUDE_SUBSTRINGS):
-                continue
-            filtered.append(m)
-
-        # Deduplicate: prefer inference profiles (us.*, global.*) over bare
-        # foundation model IDs.
-        profile_base_ids = set()
-        for m in filtered:
-            mid = m["id"]
-            if mid.startswith(("us.", "global.")):
-                base = mid.split(".", 1)[1] if "." in mid[3:] else mid
-                profile_base_ids.add(base)
-
-        deduped = []
-        for m in filtered:
-            mid = m["id"]
-            if not mid.startswith(("us.", "global.")) and mid in profile_base_ids:
-                continue
-            deduped.append(m)
-
-        _RECOMMENDED = [
-            "us.anthropic.claude-sonnet-4-6",
-            "us.anthropic.claude-opus-4-6",
-            "us.anthropic.claude-haiku-4-5",
-            "us.amazon.nova-pro",
-            "us.amazon.nova-lite",
-            "us.amazon.nova-micro",
-            "deepseek.v3",
-            "us.meta.llama4-maverick",
-            "us.meta.llama4-scout",
-        ]
-
-        def _sort_key(m):
-            mid = m["id"]
-            for i, rec in enumerate(_RECOMMENDED):
-                if mid.startswith(rec):
-                    return (0, i, mid)
-            if mid.startswith("global."):
-                return (1, 0, mid)
-            return (2, 0, mid)
-
-        deduped.sort(key=_sort_key)
-        model_list = [m["id"] for m in deduped]
-        print(
-            f"  Found {len(model_list)} text model(s) (filtered from {len(live_models)} total)"
-        )
-    else:
-        model_list = _PROVIDER_MODELS.get("bedrock", [])
-        if model_list:
-            print(
-                f"  Using {len(model_list)} curated models (live discovery unavailable)"
-            )
-        else:
-            print(
-                "  No models found. Check IAM permissions for bedrock:ListFoundationModels."
-            )
-            return
-
-    # 4. Model selection
-    if model_list:
-        selected = _prompt_model_selection(model_list, current_model=current_model)
-    else:
-        try:
-            selected = input("  Model ID: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            selected = None
-
-    if selected:
-        _save_model_choice(selected)
-
-        cfg = load_config()
-        model = cfg.get("model")
-        if not isinstance(model, dict):
-            model = {"default": model} if model else {}
-            cfg["model"] = model
-        model["provider"] = "bedrock"
-        model["base_url"] = f"https://bedrock-runtime.{region}.amazonaws.com"
-        model.pop("api_mode", None)  # bedrock_converse is auto-detected
-
-        bedrock_cfg = cfg.get("bedrock", {})
-        if not isinstance(bedrock_cfg, dict):
-            bedrock_cfg = {}
-        bedrock_cfg["region"] = region
-        cfg["bedrock"] = bedrock_cfg
-
-        save_config(cfg)
-        deactivate_provider()
-
-        print(f"  Default model set to: {selected} (via AWS Bedrock, {region})")
-    else:
-        print("  No change.")
-
-
-def _model_flow_vertex(config, current_model=""):
-    """Google Vertex AI provider flow.
-
-    Credentials come from a service account JSON file or ADC — there's no
-    "API key" to prompt for, and the base URL is computed from the project
-    embedded in the credentials, so the generic api-key flow's prompts would
-    only confuse users. Region is the only optional override.
-    """
-    from hermes_cli.auth import (
-        _prompt_model_selection,
-        _save_model_choice,
-        deactivate_provider,
-    )
-    from hermes_cli.config import get_env_value, save_env_value, load_config, save_config
-    from hermes_cli.models import _PROVIDER_MODELS
-    from agent.vertex_adapter import get_vertex_config, DEFAULT_REGION
-
-    creds_path = (
-        get_env_value("VERTEX_CREDENTIALS_PATH")
-        or os.getenv("VERTEX_CREDENTIALS_PATH", "")
-        or get_env_value("GOOGLE_APPLICATION_CREDENTIALS")
-        or os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
-    )
-    if creds_path:
-        short = creds_path if len(creds_path) <= 40 else f"...{creds_path[-37:]}"
-        print(f"  Credentials: {short} ✓")
-    else:
-        print("  Credentials: Application Default Credentials (ADC)")
-        print("  (Set VERTEX_CREDENTIALS_PATH or GOOGLE_APPLICATION_CREDENTIALS")
-        print("   to a service account JSON file, or run")
-        print("   `gcloud auth application-default login`.)")
-    print()
-
-    # Probe to catch missing google-auth / invalid creds before prompting.
-    token, _ = get_vertex_config(credentials_path=creds_path or None)
-    if not token:
-        print("  ✗ Could not obtain a Vertex AI access token.")
-        print("    Install the optional dependency: pip install hermes-agent[vertex]")
-        print("    Then verify credentials are valid.")
-        return
-
-    current_region = (
-        get_env_value("VERTEX_REGION")
-        or os.getenv("VERTEX_REGION", "")
-        or get_env_value("VERTEX_LOCATION")
-        or os.getenv("VERTEX_LOCATION", "")
-        or DEFAULT_REGION
-    )
-    try:
-        region_input = input(f"  Region [{current_region}]: ").strip()
-    except (KeyboardInterrupt, EOFError):
-        print()
-        return
-    region = region_input or current_region
-    if region != current_region:
-        save_env_value("VERTEX_REGION", region)
-        print(f"  Region saved: {region}")
-        print()
-
-    model_list = _PROVIDER_MODELS.get("vertex", [])
-    if not model_list:
-        model_list = ["gemini-2.5-pro", "gemini-2.5-flash"]
-
-    selected = _prompt_model_selection(model_list, current_model)
-    if not selected:
-        print("  No change.")
-        return
-
-    _save_model_choice(selected)
-
-    cfg = load_config()
-    model = cfg.get("model")
-    if not isinstance(model, dict):
-        model = {"default": model} if model else {}
-        cfg["model"] = model
-    model["provider"] = "vertex"
-    model.pop("base_url", None)
-    model.pop("api_mode", None)
-    save_config(cfg)
-    deactivate_provider()
-    print(f"  Default model set to: {selected} (via Google Vertex AI, {region})")
-
-
-def _model_flow_api_key_provider(config, provider_id, current_model=""):
-    """Generic flow for API-key providers (z.ai, MiniMax, OpenCode, etc.)."""
-    from hermes_cli.auth import (
-        PROVIDER_REGISTRY,
-        _prompt_model_selection,
-        _save_model_choice,
-        deactivate_provider,
-    )
-    from hermes_cli.config import (
-        get_env_value,
-        save_env_value,
-        load_config,
-        save_config,
-    )
-    from hermes_cli.models import (
-        _PROVIDER_MODELS,
-        fetch_api_models,
-        opencode_model_api_mode,
-        normalize_opencode_model_id,
-    )
-
-    pconfig = PROVIDER_REGISTRY[provider_id]
-    key_env = pconfig.api_key_env_vars[0] if pconfig.api_key_env_vars else ""
-    base_url_env = pconfig.base_url_env_var or ""
-
-    # Check / prompt for API key
-    existing_key = ""
-    for ev in pconfig.api_key_env_vars:
-        existing_key = get_env_value(ev) or os.getenv(ev, "")
-        if existing_key:
-            break
-
-    existing_key, abort = _prompt_api_key(
-        pconfig, existing_key, provider_id=provider_id
-    )
-    if abort:
-        return
-
-    # Gemini free-tier gate: free-tier daily quotas (<= 250 RPD for Flash)
-    # are exhausted in a handful of agent turns, so refuse to wire up the
-    # provider with a free-tier key. Probe is best-effort; network or auth
-    # errors fall through without blocking.
-    if provider_id == "gemini" and existing_key:
-        try:
-            from agent.gemini_native_adapter import probe_gemini_tier
-        except Exception:
-            probe_gemini_tier = None
-        if probe_gemini_tier is not None:
-            print("  Checking Gemini API tier...")
-            probe_base = (
-                (get_env_value(base_url_env) if base_url_env else "")
-                or os.getenv(base_url_env or "", "")
-                or pconfig.inference_base_url
-            )
-            tier = probe_gemini_tier(existing_key, probe_base)
-            if tier == "free":
-                print()
-                print(
-                    "❌ This Google API key is on the free tier "
-                    "(<= 250 requests/day for gemini-2.5-flash)."
-                )
-                print(
-                    "   Hermes typically makes 3-10 API calls per user turn "
-                    "(tool iterations + auxiliary tasks),"
-                )
-                print(
-                    "   so the free tier is exhausted after a handful of "
-                    "messages and cannot sustain"
-                )
-                print("   an agent session.")
-                print()
-                print(
-                    "   To use Gemini with Hermes, enable billing on your "
-                    "Google Cloud project and regenerate"
-                )
-                print(
-                    "   the key in a billing-enabled project: "
-                    "https://aistudio.google.com/apikey"
-                )
-                print()
-                print(
-                    "   Alternatives with workable free usage: DeepSeek, "
-                    "OpenRouter (free models), Groq, Nous."
-                )
-                print()
-                print("Not saving Gemini as the default provider.")
-                return
-            if tier == "paid":
-                print("  Tier check: paid ✓")
-            else:
-                # "unknown" -- network issue, auth problem, unexpected response.
-                # Don't block; the runtime 429 handler will surface free-tier
-                # guidance if the key turns out to be free tier.
-                print("  Tier check: could not verify (proceeding anyway).")
-            print()
-
-    # Optional base URL override.
-    # Precedence: env var → config.yaml model.base_url → registry default.
-    # Reading config.yaml prevents silently overwriting a saved remote URL
-    # (e.g. a remote LM Studio endpoint) with localhost when the user just
-    # presses Enter at the prompt below.
-    current_base = ""
-    if base_url_env:
-        current_base = get_env_value(base_url_env) or os.getenv(base_url_env, "")
-    if not current_base:
-        try:
-            _m = load_config().get("model") or {}
-            if str(_m.get("provider") or "").strip().lower() == provider_id:
-                current_base = str(_m.get("base_url") or "").strip()
-        except Exception:
-            pass
-    effective_base = current_base or pconfig.inference_base_url
-
-    try:
-        override = input(f"Base URL [{effective_base}]: ").strip()
-    except (KeyboardInterrupt, EOFError):
-        print()
-        override = ""
-    if override and base_url_env:
-        if not override.startswith(("http://", "https://")):
-            print(
-                "  Invalid URL — must start with http:// or https://. Keeping current value."
-            )
-        else:
-            save_env_value(base_url_env, override)
-            effective_base = override
-
-    # Model selection — resolution order:
-    #   1. models.dev registry (cached, filtered for agentic/tool-capable models)
-    #   2. Curated static fallback list (offline insurance)
-    #   3. Live /models endpoint probe (small providers without models.dev data)
-    #
-    # LM Studio: live /api/v1/models probe (no models.dev catalog).
-    # Ollama Cloud: merged discovery (live API + models.dev + disk cache).
-    if provider_id == "lmstudio":
-        from hermes_cli.auth import AuthError
-        from hermes_cli.models import fetch_lmstudio_models
-
-        api_key_for_probe = existing_key or (get_env_value(key_env) if key_env else "")
-        try:
-            model_list = fetch_lmstudio_models(
-                api_key=api_key_for_probe, base_url=effective_base
-            )
-        except AuthError as exc:
-            print(f"  LM Studio rejected the request: {exc}")
-            print("  Set LM_API_KEY (or update it) to match the server's bearer token.")
-            model_list = []
-        if model_list:
-            print(f"  Found {len(model_list)} model(s) from LM Studio")
-    elif provider_id == "ollama-cloud":
-        from hermes_cli.models import fetch_ollama_cloud_models
-
-        api_key_for_probe = existing_key or (get_env_value(key_env) if key_env else "")
-        # During setup, force a live refresh so the picker reflects newly
-        # released models (e.g. deepseek v4 flash, kimi k2.6) the moment
-        # the user enters their key — not an hour later when the disk
-        # cache TTL expires.
-        model_list = fetch_ollama_cloud_models(
-            api_key=api_key_for_probe,
-            base_url=effective_base,
-            force_refresh=True,
-        )
-        if model_list:
-            print(f"  Found {len(model_list)} model(s) from Ollama Cloud")
-    elif provider_id == "novita":
-        from hermes_cli.models import fetch_api_models
-
-        api_key_for_probe = existing_key or (get_env_value(key_env) if key_env else "")
-        curated = _PROVIDER_MODELS.get(provider_id, [])
-        live_models = fetch_api_models(api_key_for_probe, effective_base)
-        if live_models:
-            model_list = live_models
-            print(f"  Found {len(model_list)} model(s) from {pconfig.name} API")
-        else:
-            mdev_models: list = []
-            try:
-                from agent.models_dev import list_agentic_models
-
-                mdev_models = list_agentic_models(provider_id)
-            except Exception:
-                pass
-            if mdev_models:
-                seen = {m.lower() for m in mdev_models}
-                model_list = list(mdev_models)
-                for m in curated:
-                    if m.lower() not in seen:
-                        model_list.append(m)
-                        seen.add(m.lower())
-                print(f"  Found {len(model_list)} model(s) from models.dev registry")
-            else:
-                model_list = curated
-                if model_list:
-                    print(
-                        f'  Showing {len(model_list)} curated models — use "Enter custom model name" for others.'
-                    )
-    else:
-        curated = _PROVIDER_MODELS.get(provider_id, [])
-
-        # Try models.dev first — returns tool-capable models, filtered for noise
-        mdev_models: list = []
-        try:
-            from agent.models_dev import list_agentic_models
-
-            mdev_models = list_agentic_models(provider_id)
-        except Exception:
-            pass
-
-        if mdev_models:
-            # Merge models.dev with curated list so newly added models
-            # (not yet in models.dev) still appear in the picker.
-            if curated:
-                seen = {m.lower() for m in mdev_models}
-                merged = list(mdev_models)
-                for m in curated:
-                    if m.lower() not in seen:
-                        merged.append(m)
-                        seen.add(m.lower())
-                model_list = merged
-            else:
-                model_list = mdev_models
-            print(f"  Found {len(model_list)} model(s) from models.dev registry")
-        elif curated and len(curated) >= 8:
-            # Curated list is substantial — use it directly, skip live probe
-            model_list = curated
-            print(
-                f'  Showing {len(model_list)} curated models — use "Enter custom model name" for others.'
-            )
-        else:
-            api_key_for_probe = existing_key or (
-                get_env_value(key_env) if key_env else ""
-            )
-            live_models = fetch_api_models(api_key_for_probe, effective_base)
-            if live_models and len(live_models) >= len(curated):
-                model_list = live_models
-                print(f"  Found {len(model_list)} model(s) from {pconfig.name} API")
-            else:
-                model_list = curated
-                if model_list:
-                    print(
-                        f'  Showing {len(model_list)} curated models — use "Enter custom model name" for others.'
-                    )
-            # else: no defaults either, will fall through to raw input
-
-    if provider_id in {"opencode-zen", "opencode-go"}:
-        model_list = [
-            normalize_opencode_model_id(provider_id, mid) for mid in model_list
-        ]
-        current_model = normalize_opencode_model_id(provider_id, current_model)
-        model_list = list(dict.fromkeys(mid for mid in model_list if mid))
-
-    if model_list:
-        selected = _prompt_model_selection(model_list, current_model=current_model)
-    else:
-        try:
-            selected = input("Model name: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            selected = None
-
-    if selected:
-        if provider_id in {"opencode-zen", "opencode-go"}:
-            selected = normalize_opencode_model_id(provider_id, selected)
-
-        _save_model_choice(selected)
-
-        # Update config with provider, base URL, and provider-specific API mode
-        cfg = load_config()
-        model = cfg.get("model")
-        if not isinstance(model, dict):
-            model = {"default": model} if model else {}
-            cfg["model"] = model
-        model["provider"] = provider_id
-        model["base_url"] = effective_base
-        if provider_id in {"opencode-zen", "opencode-go"}:
-            model["api_mode"] = opencode_model_api_mode(provider_id, selected)
-        else:
-            model.pop("api_mode", None)
-        save_config(cfg)
-        deactivate_provider()
-
-        print(f"Default model set to: {selected} (via {pconfig.name})")
-    else:
-        print("No change.")
 
 
 def _run_anthropic_oauth_flow(save_env_value):
@@ -9311,6 +8431,31 @@ def _pause_windows_gateways_for_update() -> dict | None:
         logger.debug("Could not discover Windows gateway PIDs before update: %s", exc)
         return None
     if not running_pids:
+        # No gateway is running right now, but the user may have installed an
+        # autostart entry (Scheduled Task or Startup-folder login item) — that
+        # is an explicit "I want a gateway" signal. A gateway that died between
+        # updates (e.g. the spawning terminal/TUI closed, taking its child with
+        # it) would otherwise never come back: the autostart entry only fires on
+        # the next login, and the update flow's resume path only relaunched
+        # gateways that were running when the update began. Cold-start one after
+        # the update so an installed gateway is actually up post-update. Users
+        # who run gateway-less (no autostart entry) get nothing forced on them.
+        try:
+            from hermes_cli import gateway_windows
+
+            if gateway_windows.is_installed():
+                return {
+                    "resume_needed": True,
+                    "profiles": {},
+                    "unmapped_pids": [],
+                    "unmapped": [],
+                    "cold_start_if_installed": True,
+                }
+        except Exception as exc:
+            logger.debug(
+                "Could not check Windows gateway autostart state before update: %s",
+                exc,
+            )
         return None
 
     profile_processes = {}
@@ -9388,6 +8533,51 @@ def _pause_windows_gateways_for_update() -> dict | None:
     }
 
 
+def _cold_start_windows_gateway_after_update() -> None:
+    """Start a fresh detached gateway after update when one is installed but down.
+
+    Invoked from ``_resume_windows_gateways_after_update`` for the
+    ``cold_start_if_installed`` case: no gateway was running when the update
+    began, but an autostart entry (Scheduled Task / Startup-folder login item)
+    is installed, signalling the user wants a gateway. Unlike the relaunch
+    paths — which watch an old PID and respawn once it exits — this is a direct
+    fresh spawn via the same windowless ``pythonw`` + breakaway path that
+    ``hermes gateway start`` uses (``gateway_windows._spawn_detached``).
+
+    Best-effort and idempotent: re-checks that nothing is running first so a
+    concurrent start (e.g. the autostart entry firing) can't produce a
+    duplicate gateway.
+    """
+    if not _is_windows():
+        return
+    try:
+        from hermes_cli import gateway_windows
+        from hermes_cli.gateway import find_gateway_pids
+    except Exception as exc:
+        logger.debug("Could not load Windows gateway cold-start helpers: %s", exc)
+        return
+
+    # Re-check liveness right before spawning — between pause and resume the
+    # autostart entry may have already brought a gateway up, or a leftover
+    # process may have re-registered. Don't double-start.
+    try:
+        if list(find_gateway_pids(all_profiles=True)):
+            return
+    except Exception as exc:
+        logger.debug("Could not re-check gateway liveness before cold-start: %s", exc)
+        return
+
+    try:
+        pid = gateway_windows._spawn_detached()
+    except Exception as exc:
+        logger.debug("Could not cold-start Windows gateway after update: %s", exc)
+        return
+
+    if pid:
+        print()
+        print(f"  ✓ Starting Windows gateway after update (PID {pid})")
+
+
 def _resume_windows_gateways_after_update(token: dict | None) -> None:
     """Restart Windows profile gateways previously paused for update."""
     if not token or not token.get("resume_needed"):
@@ -9398,7 +8588,10 @@ def _resume_windows_gateways_after_update(token: dict | None) -> None:
 
     profiles = token.get("profiles") or {}
     unmapped = token.get("unmapped") or []
+    cold_start = bool(token.get("cold_start_if_installed"))
     if not profiles and not any(u.get("argv") for u in unmapped):
+        if cold_start:
+            _cold_start_windows_gateway_after_update()
         return
 
     try:
@@ -10404,13 +9597,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
             logger.debug("FHS PATH guard check failed: %s", e)
 
         # Refresh the cua-driver binary used by the Computer Use toolset.
-        # The upstream installer is gated on macOS and on the binary already
-        # being on PATH, so this is a no-op for users who don't have it.
-        # Tying the refresh to ``hermes update`` gives users a predictable
-        # cadence (matches when they pull new agent code) without adding
-        # startup latency or a per-launch GitHub API call.
+        # The upstream installer is gated on supported platforms and on the
+        # binary already being on PATH, so this is a no-op for users who
+        # don't have it. Tying the refresh to ``hermes update`` gives users a
+        # predictable cadence (matches when they pull new agent code) without
+        # adding startup latency or a per-launch GitHub API call.
         try:
-            if sys.platform == "darwin" and shutil.which("cua-driver"):
+            if sys.platform in ("darwin", "win32", "linux") and shutil.which("cua-driver"):
                 from hermes_cli.tools_config import install_cua_driver
 
                 print()
@@ -13242,23 +12435,28 @@ def main():
     # =========================================================================
     computer_use_parser = subparsers.add_parser(
         "computer-use",
-        help="Manage the Computer Use (cua-driver) backend (macOS)",
+        help="Manage the Computer Use (cua-driver) backend (macOS/Windows/Linux)",
         description=(
             "Install or check the cua-driver binary used by the\n"
-            "`computer_use` toolset. macOS-only.\n\n"
+            "`computer_use` toolset. Supported on macOS, Windows, and\n"
+            "Linux.\n\n"
             "Use `hermes computer-use install` to fetch and run the\n"
             "upstream cua-driver installer. This is equivalent to the\n"
             "post-setup hook that `hermes tools` runs when you first\n"
             "enable the Computer Use toolset, and is a stable target\n"
             "for re-running the install if it didn't fire (e.g. when\n"
-            "toggling the toolset on a returning-user setup)."
+            "toggling the toolset on a returning-user setup).\n\n"
+            "Use `hermes computer-use doctor` to run cua-driver's\n"
+            "`health_report` MCP tool and surface its check matrix\n"
+            "(TCC, bundle identity, version, platform support, ...)\n"
+            "in human-readable form."
         ),
     )
     computer_use_sub = computer_use_parser.add_subparsers(dest="computer_use_action")
 
     computer_use_install = computer_use_sub.add_parser(
         "install",
-        help="Install or repair the cua-driver binary (macOS)",
+        help="Install or repair the cua-driver binary (macOS/Windows/Linux)",
     )
     computer_use_install.add_argument(
         "--upgrade",
@@ -13273,6 +12471,42 @@ def main():
         "status",
         help="Print whether cua-driver is installed and on PATH",
     )
+    computer_use_doctor = computer_use_sub.add_parser(
+        "doctor",
+        help="Run cua-driver `health_report` and surface the check matrix",
+        description=(
+            "Drive cua-driver's stable `health_report` MCP tool and render\n"
+            "its check matrix (TCC permissions, bundle identity, version,\n"
+            "platform support, screenshot probe, …) as human-readable\n"
+            "output. cua-driver owns the health model; this command stays\n"
+            "thin so new checks added upstream surface here without code\n"
+            "changes. Exits 0 when overall=ok, 1 when degraded/failed, 2\n"
+            "when the binary is missing or unreachable."
+        ),
+    )
+    computer_use_doctor.add_argument(
+        "--include",
+        action="append",
+        default=[],
+        metavar="CHECK",
+        help=(
+            "Run only the listed checks. Repeat for multiple "
+            "(e.g. --include tcc_accessibility --include bundle_identity). "
+            "Unknown names are reported by cua-driver."
+        ),
+    )
+    computer_use_doctor.add_argument(
+        "--skip",
+        action="append",
+        default=[],
+        metavar="CHECK",
+        help="Skip the listed checks. Repeat for multiple. Wins over --include.",
+    )
+    computer_use_doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the raw structured payload as JSON (same shape as `tools/call`).",
+    )
 
     def cmd_computer_use(args):
         action = getattr(args, "computer_use_action", None)
@@ -13283,12 +12517,17 @@ def main():
         if action == "status":
             import shutil
             import subprocess
-            path = shutil.which("cua-driver")
+            from hermes_cli.tools_config import _cua_driver_cmd
+            # Honor HERMES_CUA_DRIVER_CMD for local-build testing — same
+            # resolver `install_cua_driver` and the runtime backend use,
+            # so `status` reports what `computer_use` will actually invoke.
+            driver_cmd = _cua_driver_cmd()
+            path = shutil.which(driver_cmd)
             if path:
                 version = ""
                 try:
                     version = subprocess.run(
-                        ["cua-driver", "--version"],
+                        [path, "--version"],
                         capture_output=True, text=True, timeout=5,
                     ).stdout.strip()
                 except Exception:
@@ -13297,11 +12536,32 @@ def main():
                     print(f"cua-driver: installed at {path} ({version})")
                 else:
                     print(f"cua-driver: installed at {path}")
-                print("  Refresh to latest: hermes computer-use install --upgrade")
+                try:
+                    from tools.computer_use.cua_backend import cua_driver_update_check
+                    st = cua_driver_update_check()
+                    if st and st.get("update_available"):
+                        latest = st.get("latest_version") or "?"
+                        print(f"  ⬆ Update available: cua-driver {latest}.")
+                        print("    Run: hermes computer-use install --upgrade")
+                    elif st:
+                        print("  ✓ Up to date.")
+                    else:
+                        # Older driver (no check-update verb) or offline.
+                        print("  Refresh to latest: hermes computer-use install --upgrade")
+                except Exception:
+                    print("  Refresh to latest: hermes computer-use install --upgrade")
                 return
             print("cua-driver: not installed")
             print("  Run: hermes computer-use install")
             return
+        if action == "doctor":
+            from tools.computer_use.doctor import run_doctor
+            code = run_doctor(
+                include=list(getattr(args, "include", []) or []),
+                skip=list(getattr(args, "skip", []) or []),
+                json_output=bool(getattr(args, "json", False)),
+            )
+            sys.exit(code)
         # No subcommand → show help
         computer_use_parser.print_help()
 
@@ -13709,6 +12969,7 @@ def main():
         cmd_dashboard=cmd_dashboard,
         cmd_dashboard_register=cmd_dashboard_register,
     )
+
 
     # =========================================================================
     # desktop (a.k.a. gui) command

@@ -435,10 +435,9 @@ class TestResolveVisionMainFirst:
         assert captured == {"is_agent_turn": True, "is_vision": False}
         assert "default_headers" not in mock_openai.call_args.kwargs
 
-    def test_main_unavailable_vision_falls_through_to_google_gemini_cli(self):
-        """Main provider fails → fall back to google-gemini-cli vision backend."""
-        gemini_client = MagicMock()
-
+    def test_main_unavailable_vision_falls_through_to_aggregators(self):
+        """Main provider fails → fall back to OpenRouter/Nous strict backends."""
+        fallback_client = MagicMock()
         with patch(
             "agent.auxiliary_client._read_main_provider", return_value="deepseek",
         ), patch(
@@ -446,36 +445,9 @@ class TestResolveVisionMainFirst:
         ), patch(
             "agent.auxiliary_client.resolve_provider_client",
             return_value=(None, None),
-        ) as mock_rpc, patch(
-            "agent.auxiliary_client._resolve_task_provider_model",
-            return_value=("auto", None, None, None, None),
-        ):
-            # resolve_provider_client returns (None, None) for the main
-            # provider ("deepseek") but should return a real client when
-            # called again for "google-gemini-cli" from the strict backend.
-            mock_rpc.side_effect = [
-                (None, None),                      # deepseek main provider
-                (gemini_client, "gemini-2.5-flash"),  # google-gemini-cli strict backend
-            ]
-            from agent.auxiliary_client import resolve_vision_provider_client
-
-            provider, client, model = resolve_vision_provider_client()
-
-        assert provider == "google-gemini-cli"
-        assert client is gemini_client
-        assert model == "gemini-2.5-flash"
-
-    def test_opencode_go_main_vision_uses_main_provider(self):
-        """opencode-go (kimi-k2.6) has vision — main provider should be used directly."""
-        opencode_client = MagicMock()
-
-        with patch(
-            "agent.auxiliary_client._read_main_provider", return_value="opencode-go",
         ), patch(
-            "agent.auxiliary_client._read_main_model", return_value="kimi-k2.6",
-        ), patch(
-            "agent.auxiliary_client.resolve_provider_client",
-            return_value=(opencode_client, "kimi-k2.6"),
+            "agent.auxiliary_client._resolve_strict_vision_backend",
+            return_value=(fallback_client, "google/gemini-3-flash-preview"),
         ), patch(
             "agent.auxiliary_client._resolve_task_provider_model",
             return_value=("auto", None, None, None, None),

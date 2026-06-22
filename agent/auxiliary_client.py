@@ -48,8 +48,8 @@ import threading
 import time
 from pathlib import Path  # noqa: F401 — used by test mocks
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse, urlunparse
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from urllib.parse import urlparse, parse_qs, urlunparse
 
 # NOTE: `from openai import OpenAI` is deliberately NOT at module top — the
 # openai SDK pulls a large type tree (~240 ms cold, including responses/*,
@@ -101,7 +101,6 @@ class _OpenAIProxy:
 OpenAI = _OpenAIProxy()  # module-level name, resolves lazily on call/isinstance
 
 from agent.credential_pool import load_pool
-from agent.vertex_adapter import get_vertex_config
 from hermes_cli.config import get_hermes_home
 from hermes_constants import OPENROUTER_BASE_URL
 from utils import base_url_host_matches, base_url_hostname, env_float, model_forces_max_completion_tokens, normalize_proxy_env_vars
@@ -782,19 +781,17 @@ class _CodexCompletionsAdapter:
             # constraints after the first auxiliary xAI call.  See #27907.
             try:
                 import copy as _copy
-
                 from tools.schema_sanitizer import (
                     strip_pattern_and_format,
                     strip_slash_enum,
                 )
-
                 tools = _copy.deepcopy(list(tools))
                 tools, _ = strip_pattern_and_format(tools)
                 tools, _ = strip_slash_enum(tools)
             except Exception as exc:
                 logger.warning(
-                    "Auxiliary client: failed to sanitize tool schemas for Codex/xAI Responses path: %s",
-                    exc,
+                    "Auxiliary client: failed to sanitize tool schemas for "
+                    "Codex/xAI Responses path: %s", exc,
                 )
             converted = []
             for t in tools:
@@ -849,7 +846,6 @@ class _CodexCompletionsAdapter:
                 raise TimeoutError(_timeout_message())
             try:
                 from tools.interrupt import is_interrupted
-
                 # Honor interrupt protection for atomic aux tasks (compression):
                 # a mid-flight gateway interrupt must NOT abort the summary call
                 # and trigger a degraded fallback marker (#23975). Timeouts above
@@ -917,34 +913,32 @@ class _CodexCompletionsAdapter:
                     val = obj.get(key, default)
                 return val if val is not None else default
 
-            for item in getattr(final, "output", None) or []:
+            for item in (getattr(final, "output", None) or []):
                 item_type = _item_get(item, "type")
                 if item_type == "message":
-                    for part in _item_get(item, "content") or []:
+                    for part in (_item_get(item, "content") or []):
                         ptype = _item_get(part, "type")
                         if ptype in {"output_text", "text"}:
                             text_parts.append(_item_get(part, "text", ""))
                 elif item_type == "function_call":
-                    tool_calls_raw.append(
-                        SimpleNamespace(
-                            id=_item_get(item, "call_id", ""),
-                            type="function",
-                            function=SimpleNamespace(
-                                name=_item_get(item, "name", ""),
-                                arguments=_item_get(item, "arguments", "{}"),
-                            ),
-                        )
-                    )
+                    tool_calls_raw.append(SimpleNamespace(
+                        id=_item_get(item, "call_id", ""),
+                        type="function",
+                        function=SimpleNamespace(
+                            name=_item_get(item, "name", ""),
+                            arguments=_item_get(item, "arguments", "{}"),
+                        ),
+                    ))
 
             resp_usage = getattr(final, "usage", None)
             if resp_usage:
                 usage = SimpleNamespace(
                     prompt_tokens=getattr(resp_usage, "input_tokens", 0)
-                    or (resp_usage.get("input_tokens", 0) if isinstance(resp_usage, dict) else 0),
+                        or (resp_usage.get("input_tokens", 0) if isinstance(resp_usage, dict) else 0),
                     completion_tokens=getattr(resp_usage, "output_tokens", 0)
-                    or (resp_usage.get("output_tokens", 0) if isinstance(resp_usage, dict) else 0),
+                        or (resp_usage.get("output_tokens", 0) if isinstance(resp_usage, dict) else 0),
                     total_tokens=getattr(resp_usage, "total_tokens", 0)
-                    or (resp_usage.get("total_tokens", 0) if isinstance(resp_usage, dict) else 0),
+                        or (resp_usage.get("total_tokens", 0) if isinstance(resp_usage, dict) else 0),
                 )
         except Exception as exc:
             if timed_out.is_set():
@@ -1012,7 +1006,6 @@ class _AsyncCodexCompletionsAdapter:
 
     async def create(self, **kwargs) -> Any:
         import asyncio
-
         return await asyncio.to_thread(self._sync.create, **kwargs)
 
 
@@ -1090,13 +1083,14 @@ class _AnthropicCompletionsAdapter:
         # additionally strips these keys as a safety net — keep both layers.
         if temperature is not None:
             from agent.anthropic_adapter import _forbids_sampling_params
-
             if not _forbids_sampling_params(model):
                 anthropic_kwargs["temperature"] = temperature
 
         response = create_anthropic_message(self._client, anthropic_kwargs)
         _transport = get_transport("anthropic_messages")
-        _nr = _transport.normalize_response(response, strip_tool_prefix=self._is_oauth)
+        _nr = _transport.normalize_response(
+            response, strip_tool_prefix=self._is_oauth
+        )
 
         # ToolCall already duck-types as OpenAI shape (.type, .function.name,
         # .function.arguments) via properties, so no wrapping needed.
@@ -1157,7 +1151,6 @@ class _AsyncAnthropicCompletionsAdapter:
 
     async def create(self, **kwargs) -> Any:
         import asyncio
-
         return await asyncio.to_thread(self._sync.create, **kwargs)
 
 
@@ -1238,14 +1231,12 @@ def _maybe_wrap_anthropic(
         return client_obj
     try:
         from agent.gemini_native_adapter import GeminiNativeClient
-
         if _safe_isinstance(client_obj, GeminiNativeClient):
             return client_obj
     except ImportError:
         pass
     try:
         from agent.copilot_acp_client import CopilotACPClient
-
         if _safe_isinstance(client_obj, CopilotACPClient):
             return client_obj
     except ImportError:
@@ -1255,7 +1246,10 @@ def _maybe_wrap_anthropic(
     if api_mode and api_mode != "anthropic_messages":
         return client_obj
 
-    should_wrap = api_mode == "anthropic_messages" or _endpoint_speaks_anthropic_messages(base_url)
+    should_wrap = (
+        api_mode == "anthropic_messages"
+        or _endpoint_speaks_anthropic_messages(base_url)
+    )
     if not should_wrap:
         return client_obj
 
@@ -1273,24 +1267,18 @@ def _maybe_wrap_anthropic(
         real_client = build_anthropic_client(api_key, base_url)
     except Exception as exc:
         logger.warning(
-            "Failed to build Anthropic client for %s (%s) — falling back to OpenAI-wire client.",
-            base_url,
-            exc,
+            "Failed to build Anthropic client for %s (%s) — falling back to "
+            "OpenAI-wire client.", base_url, exc,
         )
         return client_obj
 
     logger.debug(
-        "Auxiliary transport: wrapping client in AnthropicAuxiliaryClient (model=%s, base_url=%s, api_mode=%s)",
-        model,
-        base_url[:60] if base_url else "",
-        api_mode or "auto-detected",
+        "Auxiliary transport: wrapping client in AnthropicAuxiliaryClient "
+        "(model=%s, base_url=%s, api_mode=%s)",
+        model, base_url[:60] if base_url else "", api_mode or "auto-detected",
     )
     return AnthropicAuxiliaryClient(
-        real_client,
-        model,
-        api_key,
-        base_url,
-        is_oauth=False,
+        real_client, model, api_key, base_url, is_oauth=False,
     )
 
 
@@ -1462,7 +1450,9 @@ def _resolve_xai_oauth_for_aux() -> Optional[Tuple[str, str]]:
             entry = pool.select()
             if entry is not None:
                 api_key = str(
-                    getattr(entry, "runtime_api_key", None) or getattr(entry, "access_token", "") or ""
+                    getattr(entry, "runtime_api_key", None)
+                    or getattr(entry, "access_token", "")
+                    or ""
                 ).strip()
                 base_url = _xai_validate_inference_base_url(
                     os.getenv("HERMES_XAI_BASE_URL", "").strip().rstrip("/")
@@ -1508,7 +1498,6 @@ def _read_codex_access_token() -> Optional[str]:
 
     try:
         from hermes_cli.auth import _read_codex_tokens
-
         data = _read_codex_tokens()
         tokens = data.get("tokens", {})
         access_token = tokens.get("access_token")
@@ -1519,7 +1508,6 @@ def _read_codex_access_token() -> Optional[str]:
         # prevent fallback to working providers (e.g. Anthropic).
         try:
             import base64
-
             payload = access_token.split(".")[1]
             payload += "=" * (-len(payload) % 4)
             claims = json.loads(base64.urlsafe_b64decode(payload))
@@ -1560,7 +1548,6 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
             # as auxiliary fallback when the user's primary provider fails.
             try:
                 from hermes_cli.auth import is_provider_explicitly_configured
-
                 if not is_provider_explicitly_configured("anthropic"):
                     continue
             except ImportError:
@@ -1596,7 +1583,6 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
             else:
                 try:
                     from providers import get_provider_profile as _gpf_aux
-
                     _ph_aux = _gpf_aux(provider_id)
                     if _ph_aux and _ph_aux.default_headers:
                         extra["default_headers"] = dict(_ph_aux.default_headers)
@@ -1637,7 +1623,6 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
         else:
             try:
                 from providers import get_provider_profile as _gpf_aux2
-
                 _ph_aux2 = _gpf_aux2(provider_id)
                 if _ph_aux2 and _ph_aux2.default_headers:
                     extra["default_headers"] = dict(_ph_aux2.default_headers)
@@ -1656,6 +1641,7 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
 # ── Provider resolution helpers ─────────────────────────────────────────────
 
 
+
 def _try_openrouter(explicit_api_key: str = None, model: str = None) -> Tuple[Optional[OpenAI], Optional[str]]:
     pool_present, entry = _select_pool_entry("openrouter")
     if pool_present:
@@ -1665,16 +1651,16 @@ def _try_openrouter(explicit_api_key: str = None, model: str = None) -> Tuple[Op
             return None, None
         base_url = _pool_runtime_base_url(entry, OPENROUTER_BASE_URL) or OPENROUTER_BASE_URL
         logger.debug("Auxiliary client: OpenRouter via pool")
-        return OpenAI(api_key=or_key, base_url=base_url, default_headers=build_or_headers()), model or _OPENROUTER_MODEL
+        return OpenAI(api_key=or_key, base_url=base_url,
+                       default_headers=build_or_headers()), model or _OPENROUTER_MODEL
 
     or_key = explicit_api_key or os.getenv("OPENROUTER_API_KEY")
     if not or_key:
         _mark_provider_unhealthy("openrouter", ttl=60)
         return None, None
     logger.debug("Auxiliary client: OpenRouter")
-    return OpenAI(
-        api_key=or_key, base_url=OPENROUTER_BASE_URL, default_headers=build_or_headers()
-    ), model or _OPENROUTER_MODEL
+    return OpenAI(api_key=or_key, base_url=OPENROUTER_BASE_URL,
+                   default_headers=build_or_headers()), model or _OPENROUTER_MODEL
 
 
 def _describe_openrouter_unavailable() -> str:
@@ -1696,7 +1682,6 @@ def _try_nous(vision: bool = False) -> Tuple[Optional[OpenAI], Optional[str]]:
     # to avoid piling more requests onto the tapped RPH bucket.
     try:
         from agent.nous_rate_guard import nous_rate_limit_remaining
-
         _remaining = nous_rate_limit_remaining()
         if _remaining is not None and _remaining > 0:
             logger.debug(
@@ -1711,11 +1696,17 @@ def _try_nous(vision: bool = False) -> Tuple[Optional[OpenAI], Optional[str]]:
     nous = _read_nous_auth()
     runtime = _resolve_nous_runtime_api(force_refresh=False)
     if runtime is None and not nous:
-        logger.warning("Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).")
+        logger.warning(
+            "Auxiliary Nous client unavailable: no Nous authentication found "
+            "(run: hermes auth)."
+        )
         _mark_provider_unhealthy("nous", ttl=60)
         return None, None
     if runtime is None and nous:
-        logger.debug("Auxiliary Nous: runtime JWT refresh failed; checking stored auth.json token.")
+        logger.debug(
+            "Auxiliary Nous: runtime JWT refresh failed; checking stored "
+            "auth.json token."
+        )
     global auxiliary_is_nous
     auxiliary_is_nous = True
     logger.debug("Auxiliary client: Nous Portal")
@@ -1729,27 +1720,23 @@ def _try_nous(vision: bool = False) -> Tuple[Optional[OpenAI], Optional[str]]:
     model = _NOUS_MODEL
     try:
         from hermes_cli.models import get_nous_recommended_aux_model
-
         recommended = get_nous_recommended_aux_model(vision=vision)
         if recommended:
             model = recommended
             logger.debug(
                 "Auxiliary/%s: using Portal-recommended model %s",
-                "vision" if vision else "text",
-                model,
+                "vision" if vision else "text", model,
             )
         else:
             logger.debug(
                 "Auxiliary/%s: no Portal recommendation, falling back to %s",
-                "vision" if vision else "text",
-                model,
+                "vision" if vision else "text", model,
             )
     except Exception as exc:
         logger.debug(
-            "Auxiliary/%s: recommended-models lookup failed (%s); falling back to %s",
-            "vision" if vision else "text",
-            exc,
-            model,
+            "Auxiliary/%s: recommended-models lookup failed (%s); "
+            "falling back to %s",
+            "vision" if vision else "text", exc, model,
         )
 
     if runtime is not None:
@@ -1758,7 +1745,8 @@ def _try_nous(vision: bool = False) -> Tuple[Optional[OpenAI], Optional[str]]:
         api_key = _nous_api_key(nous or {})
         if not api_key:
             logger.warning(
-                "Auxiliary Nous client unavailable: no usable inference JWT found (run: hermes auth add nous)."
+                "Auxiliary Nous client unavailable: no usable inference JWT found "
+                "(run: hermes auth add nous)."
             )
             _mark_provider_unhealthy("nous", ttl=60)
             return None, None
@@ -1772,7 +1760,9 @@ def _try_nous(vision: bool = False) -> Tuple[Optional[OpenAI], Optional[str]]:
     )
 
 
-def _refresh_nous_recommended_model(*, vision: bool, stale_model: Optional[str]) -> Optional[str]:
+def _refresh_nous_recommended_model(
+    *, vision: bool, stale_model: Optional[str]
+) -> Optional[str]:
     """Re-fetch the Nous Portal's recommended model after a stale-model 404.
 
     Long-lived processes (gateway, watchers) cache the Portal's
@@ -1800,8 +1790,7 @@ def _refresh_nous_recommended_model(*, vision: bool, stale_model: Optional[str])
     except Exception as exc:
         logger.debug(
             "Nous recommended-model refresh failed (%s); using default %s",
-            exc,
-            _NOUS_MODEL,
+            exc, _NOUS_MODEL,
         )
     if fresh and fresh.strip().lower() != stale:
         return fresh
@@ -1829,7 +1818,6 @@ def _read_main_model() -> str:
         return override.strip()
     try:
         from hermes_cli.config import load_config
-
         cfg = load_config()
         model_cfg = cfg.get("model", {})
         if isinstance(model_cfg, str) and model_cfg.strip():
@@ -1857,7 +1845,6 @@ def _read_main_provider() -> str:
         return override.strip().lower()
     try:
         from hermes_cli.config import load_config
-
         cfg = load_config()
         model_cfg = cfg.get("model", {})
         if isinstance(model_cfg, dict):
@@ -1985,17 +1972,19 @@ def _validate_proxy_env_urls() -> None:
 
     normalize_proxy_env_vars()
 
-    for key in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy"):
+    for key in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY",
+                "https_proxy", "http_proxy", "all_proxy"):
         value = str(os.environ.get(key) or "").strip()
         if not value:
             continue
         try:
             parsed = urlparse(value)
             if parsed.scheme:
-                _ = parsed.port  # raises ValueError for e.g. '6153export'
+                _ = parsed.port          # raises ValueError for e.g. '6153export'
         except ValueError as exc:
             raise RuntimeError(
-                f"Malformed proxy environment variable {key}={value!r}. Fix or unset your proxy settings and try again."
+                f"Malformed proxy environment variable {key}={value!r}. "
+                "Fix or unset your proxy settings and try again."
             ) from exc
 
 
@@ -2009,7 +1998,7 @@ def _validate_base_url(base_url: str) -> None:
     try:
         parsed = urlparse(candidate)
         if parsed.scheme in {"http", "https"}:
-            _ = parsed.port  # raises ValueError for malformed ports
+            _ = parsed.port              # raises ValueError for malformed ports
     except ValueError as exc:
         raise RuntimeError(
             f"Malformed custom endpoint URL: {candidate!r}. "
@@ -2048,7 +2037,6 @@ def _try_custom_endpoint() -> Tuple[Optional[Any], Optional[str]]:
         # Anthropic OAuth claims only apply to api.anthropic.com.
         try:
             from agent.anthropic_adapter import build_anthropic_client
-
             real_client = build_anthropic_client(custom_key, custom_base)
         except ImportError:
             logger.warning(
@@ -2064,11 +2052,7 @@ def _try_custom_endpoint() -> Tuple[Optional[Any], Optional[str]]:
     # api_mode explicitly (e.g. kimi.com/coding reached via custom config).
     _fallback_client = OpenAI(api_key=custom_key, base_url=_clean_base, **_extra)
     _fallback_client = _maybe_wrap_anthropic(
-        _fallback_client,
-        model,
-        custom_key,
-        custom_base,
-        custom_mode,
+        _fallback_client, model, custom_key, custom_base, custom_mode,
     )
     return _fallback_client, model
 
@@ -2170,9 +2154,9 @@ def _try_azure_foundry(
     Returns ``(client, model)`` or ``(None, None)`` on failure.
     """
     try:
+        from hermes_cli.runtime_provider import _resolve_azure_foundry_runtime
         from hermes_cli.auth import AuthError
         from hermes_cli.config import load_config
-        from hermes_cli.runtime_provider import _resolve_azure_foundry_runtime
     except ImportError:
         return None, None
 
@@ -2220,8 +2204,7 @@ def _try_azure_foundry(
         # chain falls through to the next provider rather than 404ing.
         logger.debug(
             "Auxiliary azure-foundry: no model resolved (model=%r, default=%r)",
-            model,
-            model_cfg.get("default"),
+            model, model_cfg.get("default"),
         )
         return None, None
 
@@ -2247,11 +2230,8 @@ def _try_azure_foundry(
         # ``build_anthropic_client`` detects the callable and installs
         # the bearer-injecting httpx hook.
         return _maybe_wrap_anthropic(
-            client,
-            final_model,
-            api_key,
-            base_url,
-            runtime_api_mode,
+            client, final_model, api_key,
+            base_url, runtime_api_mode,
         ), final_model
 
     # chat_completions — return the plain OpenAI client.
@@ -2278,12 +2258,9 @@ def _try_anthropic(explicit_api_key: str = None) -> Tuple[Optional[Any], Optiona
     # Allow base URL override from config.yaml model.base_url, but only
     # when the configured provider is anthropic — otherwise a non-Anthropic
     # base_url (e.g. Codex endpoint) would leak into Anthropic requests.
-    base_url = (
-        _pool_runtime_base_url(entry, _ANTHROPIC_DEFAULT_BASE_URL) if pool_present else _ANTHROPIC_DEFAULT_BASE_URL
-    )
+    base_url = _pool_runtime_base_url(entry, _ANTHROPIC_DEFAULT_BASE_URL) if pool_present else _ANTHROPIC_DEFAULT_BASE_URL
     try:
         from hermes_cli.config import load_config
-
         cfg = load_config()
         model_cfg = cfg.get("model")
         if isinstance(model_cfg, dict):
@@ -2296,7 +2273,6 @@ def _try_anthropic(explicit_api_key: str = None) -> Tuple[Optional[Any], Optiona
         pass
 
     from agent.anthropic_adapter import _is_oauth_token
-
     is_oauth = _is_oauth_token(token)
     model = _get_aux_model_for_provider("anthropic") or "claude-haiku-4-5-20251001"
     logger.debug("Auxiliary client: Anthropic native (%s) at %s (oauth=%s)", model, base_url, is_oauth)
@@ -2309,14 +2285,6 @@ def _try_anthropic(explicit_api_key: str = None) -> Tuple[Optional[Any], Optiona
         return None, None
     return AnthropicAuxiliaryClient(real_client, model, token, base_url, is_oauth=is_oauth), model
 
-
-def _try_vertex() -> Tuple[Optional[OpenAI], Optional[str]]:
-    token, base_url = get_vertex_config()
-    if not token or not base_url:
-        return None, None
-    model = os.environ.get("VERTEX_AUXILIARY_MODEL") or "google/gemini-3-flash-preview"
-    logger.debug("Auxiliary client: Vertex AI (%s)", model)
-    return OpenAI(api_key=token, base_url=base_url), model
 
 _AUTO_PROVIDER_LABELS = {
     "_try_openrouter": "openrouter",
@@ -3045,11 +3013,7 @@ def _refresh_provider_credentials(provider: str) -> bool:
             _evict_cached_clients(normalized)
             return True
         if normalized == "anthropic":
-            from agent.anthropic_adapter import (
-                _refresh_oauth_token,
-                read_claude_code_credentials,
-                resolve_anthropic_token,
-            )
+            from agent.anthropic_adapter import read_claude_code_credentials, _refresh_oauth_token, resolve_anthropic_token
 
             creds = read_claude_code_credentials()
             token = _refresh_oauth_token(creds) if isinstance(creds, dict) and creds.get("refreshToken") else None
@@ -3520,7 +3484,7 @@ def _to_async_client(sync_client, model: str, is_vision: bool = False):
     if isinstance(sync_client, AnthropicAuxiliaryClient):
         return AsyncAnthropicAuxiliaryClient(sync_client), model
     try:
-        from agent.gemini_native_adapter import AsyncGeminiNativeClient, GeminiNativeClient
+        from agent.gemini_native_adapter import GeminiNativeClient, AsyncGeminiNativeClient
 
         if isinstance(sync_client, GeminiNativeClient):
             return AsyncGeminiNativeClient(sync_client), model
@@ -3757,19 +3721,6 @@ def resolve_provider_client(
             return None, None
         final_model = _normalize_resolved_model(model or default, provider)
         return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
-                else (client, final_model))
-
-    # ── Google Vertex AI (service account → dynamic token + project URL) ──
-    if provider == "vertex":
-        client, default = _try_vertex()
-        if client is None:
-            logger.warning("resolve_provider_client: vertex requested but "
-                           "Vertex AI credentials not found (set "
-                           "GOOGLE_APPLICATION_CREDENTIALS or run "
-                           "`gcloud auth application-default login`)")
-            return None, None
-        final_model = _normalize_resolved_model(model or default, provider)
-        return (_to_async_client(client, final_model) if async_mode
                 else (client, final_model))
 
     # ── OpenAI Codex (OAuth → Responses API) ─────────────────────────
@@ -4201,8 +4152,8 @@ def resolve_provider_client(
         # AWS SDK providers (Bedrock) — use the Anthropic Bedrock client via
         # boto3's credential chain (IAM roles, SSO, env vars, instance metadata).
         try:
-            from agent.anthropic_adapter import build_anthropic_bedrock_client
             from agent.bedrock_adapter import has_aws_credentials, resolve_bedrock_region
+            from agent.anthropic_adapter import build_anthropic_bedrock_client
         except ImportError:
             logger.warning("resolve_provider_client: bedrock requested but "
                            "boto3 or anthropic SDK not installed")
@@ -4556,7 +4507,7 @@ def resolve_vision_provider_client(
 
 def get_auxiliary_extra_body() -> dict:
     """Return extra_body kwargs for auxiliary API calls.
-
+    
     Includes Nous Portal product tags when the auxiliary client is backed
     by Nous Portal. Returns empty dict otherwise.
     """

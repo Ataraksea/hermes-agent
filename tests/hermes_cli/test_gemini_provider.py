@@ -271,34 +271,6 @@ class TestGeminiAgentInit:
             resolve_provider_client("gemini")
         mock_openai.assert_called_once()
 
-    def test_google_gemini_cli_resolve_provider_client_uses_cloudcode_client(self, tmp_path, monkeypatch):
-        hermes_home = tmp_path / ".hermes"
-        hermes_home.mkdir()
-        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-
-        from agent.google_oauth import GoogleCredentials, save_credentials
-        from hermes_constants import get_hermes_home
-
-        save_credentials(GoogleCredentials(
-            access_token="oauth-token",
-            refresh_token="refresh-token",
-            expires_ms=int((__import__("time").time() + 3600) * 1000),
-            project_id="proj-123",
-            email="brad@example.com",
-        ))
-        assert get_hermes_home().exists()
-
-        with patch("agent.gemini_cloudcode_adapter.GeminiCloudCodeClient") as mock_client, \
-             patch("agent.auxiliary_client.OpenAI") as mock_openai:
-            mock_client.return_value = MagicMock()
-            from agent.auxiliary_client import resolve_provider_client
-            client, model = resolve_provider_client("google-gemini-cli", "gemini-2.5-flash")
-
-        assert client is not None
-        assert model == "gemini-2.5-flash"
-        mock_client.assert_called_once()
-        mock_openai.assert_not_called()
-
 
 # ── models.dev Integration ──
 

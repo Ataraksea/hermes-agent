@@ -403,14 +403,6 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("XIAOMI_API_KEY",),
         base_url_env_var="XIAOMI_BASE_URL",
     ),
-    "vertex": ProviderConfig(
-        id="vertex",
-        name="Google Vertex AI",
-        auth_type="vertex",
-        inference_base_url="https://aiplatform.googleapis.com/v1beta1",
-        api_key_env_vars=("VERTEX_CREDENTIALS_PATH", "GOOGLE_APPLICATION_CREDENTIALS"),
-        base_url_env_var="VERTEX_BASE_URL",
-    ),
     "tencent-tokenhub": ProviderConfig(
         id="tencent-tokenhub",
         name="Tencent TokenHub",
@@ -442,87 +434,6 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         inference_base_url="",  # User-provided endpoint
         api_key_env_vars=("AZURE_FOUNDRY_API_KEY",),
         base_url_env_var="AZURE_FOUNDRY_BASE_URL",
-    ),
-    # -- ACP agent providers (Agent Client Protocol) -------------------------
-    # Each spawns an external coding agent via ACP. Auth is handled by the
-    # agent's own adapter, with env var bridging in acp_agent_registry.py.
-    "claude-acp": ProviderConfig(
-        id="claude-acp",
-        name="Claude (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://claude",
-    ),
-    "codex-acp": ProviderConfig(
-        id="codex-acp",
-        name="Codex CLI (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://codex",
-    ),
-    "gemini-acp": ProviderConfig(
-        id="gemini-acp",
-        name="Gemini CLI (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://gemini",
-    ),
-    "cursor-acp": ProviderConfig(
-        id="cursor-acp",
-        name="Cursor (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://cursor",
-    ),
-    "kiro-acp": ProviderConfig(
-        id="kiro-acp",
-        name="Kiro (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://kiro",
-    ),
-    "kilocode-acp": ProviderConfig(
-        id="kilocode-acp",
-        name="KiloCode (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://kilocode",
-    ),
-    "opencode-acp": ProviderConfig(
-        id="opencode-acp",
-        name="OpenCode (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://opencode",
-    ),
-    "kimi-acp": ProviderConfig(
-        id="kimi-acp",
-        name="Kimi (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://kimi",
-    ),
-    "qwen-acp": ProviderConfig(
-        id="qwen-acp",
-        name="Qwen (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://qwen",
-    ),
-    "cline-acp": ProviderConfig(
-        id="cline-acp",
-        name="Cline (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://cline",
-    ),
-    "amp-acp": ProviderConfig(
-        id="amp-acp",
-        name="Amp (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://amp",
-    ),
-    "droid-acp": ProviderConfig(
-        id="droid-acp",
-        name="Droid (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://droid",
-    ),
-    "iflow-acp": ProviderConfig(
-        id="iflow-acp",
-        name="iFlow (ACP)",
-        auth_type="external_process",
-        inference_base_url="acp://iflow",
     ),
 }
 
@@ -1686,7 +1597,7 @@ def resolve_provider(
 
     # Auto-detect API-key providers by checking their env vars
     for pid, pconfig in PROVIDER_REGISTRY.items():
-        if pconfig.auth_type not in ("api_key", "vertex"):
+        if pconfig.auth_type != "api_key":
             continue
         # GitHub tokens are commonly present for repo/tool access but should not
         # hijack inference auto-selection unless the user explicitly chooses
@@ -3369,7 +3280,7 @@ def _print_loopback_ssh_hint(redirect_uri: str, *, docs_url: str | None = None) 
 
 def _read_codex_tokens(*, _lock: bool = True) -> Dict[str, Any]:
     """Read Codex OAuth tokens from Hermes auth store (~/.hermes/auth.json).
-
+    
     Returns dict with 'tokens' (access_token, refresh_token) and 'last_refresh'.
     Raises AuthError if no Codex tokens are stored.
     """
@@ -3597,10 +3508,14 @@ def refresh_codex_oauth_pure(
         # "run hermes auth" prompt (see issue #32790).
         retry_after = _parse_retry_after_seconds(getattr(response, "headers", None))
         if retry_after is not None:
-            message = f"Codex provider quota exhausted (429); retry after {retry_after}s. Credentials are still valid."
+            message = (
+                f"Codex provider quota exhausted (429); retry after {retry_after}s. "
+                "Credentials are still valid."
+            )
         else:
             message = (
-                "Codex provider quota exhausted (429). Credentials are still valid; retry after the usage limit resets."
+                "Codex provider quota exhausted (429). Credentials are still valid; "
+                "retry after the usage limit resets."
             )
         raise AuthError(
             message,
@@ -3690,7 +3605,7 @@ def _refresh_codex_auth_tokens(
     timeout_seconds: float,
 ) -> Dict[str, str]:
     """Refresh Codex access token using the refresh token.
-
+    
     Saves the new tokens to Hermes auth store automatically.
     """
     try:
@@ -3731,7 +3646,7 @@ def _refresh_codex_auth_tokens(
 
 def _import_codex_cli_tokens() -> Optional[Dict[str, str]]:
     """Try to read tokens from ~/.codex/auth.json (Codex CLI shared file).
-
+    
     Returns tokens dict if valid and not expired, None otherwise.
     Does NOT write to the shared file.
     """
@@ -3755,8 +3670,7 @@ def _import_codex_cli_tokens() -> Optional[Dict[str, str]]:
         # but no working credentials.
         if _codex_access_token_is_expiring(access_token, 0):
             logger.debug(
-                "Codex CLI tokens at %s are expired — skipping import.",
-                auth_path,
+                "Codex CLI tokens at %s are expired — skipping import.", auth_path,
             )
             return None
         return dict(tokens)
@@ -3802,7 +3716,10 @@ def resolve_codex_runtime_credentials(
     if data is None:
         pool_token = _pool_codex_access_token()
         if pool_token:
-            base_url = os.getenv("HERMES_CODEX_BASE_URL", "").strip().rstrip("/") or DEFAULT_CODEX_BASE_URL
+            base_url = (
+                os.getenv("HERMES_CODEX_BASE_URL", "").strip().rstrip("/")
+                or DEFAULT_CODEX_BASE_URL
+            )
             return {
                 "provider": "openai-codex",
                 "base_url": base_url,
@@ -3862,7 +3779,10 @@ def resolve_codex_runtime_credentials(
                 tokens = _refresh_codex_auth_tokens(tokens, refresh_timeout_seconds)
                 access_token = str(tokens.get("access_token", "") or "").strip()
 
-    base_url = os.getenv("HERMES_CODEX_BASE_URL", "").strip().rstrip("/") or DEFAULT_CODEX_BASE_URL
+    base_url = (
+        os.getenv("HERMES_CODEX_BASE_URL", "").strip().rstrip("/")
+        or DEFAULT_CODEX_BASE_URL
+    )
 
     return {
         "provider": "openai-codex",
@@ -4260,24 +4180,21 @@ def _xai_validate_inference_base_url(value: str, *, fallback: str) -> str:
     except Exception:
         logger.warning(
             "Ignoring malformed xAI base_url override %r; using %s instead.",
-            candidate,
-            fallback,
+            candidate, fallback,
         )
         return fallback
     if parsed.scheme != "https":
         logger.warning(
             "Refusing non-HTTPS xAI base_url override %r (xai-oauth bearer would "
             "be sent in cleartext); falling back to %s.",
-            candidate,
-            fallback,
+            candidate, fallback,
         )
         return fallback
     host = (parsed.hostname or "").lower()
     if not host:
         logger.warning(
             "Ignoring xAI base_url override %r with no hostname; using %s instead.",
-            candidate,
-            fallback,
+            candidate, fallback,
         )
         return fallback
     if host != "x.ai" and not host.endswith(".x.ai"):
@@ -4286,9 +4203,7 @@ def _xai_validate_inference_base_url(value: str, *, fallback: str) -> str:
             "(expected x.ai or a *.x.ai subdomain). The xai-oauth bearer is only "
             "valid against xAI's inference API; sending it elsewhere would leak "
             "the credential. Falling back to %s.",
-            candidate,
-            host,
-            fallback,
+            candidate, host, fallback,
         )
         return fallback
     return candidate
@@ -4390,18 +4305,19 @@ def refresh_xai_oauth_pure(
                 "xAI token refresh failed with HTTP 403."
                 + (f" Response: {detail}" if detail else "")
                 + " This OAuth account is not authorized for xAI API"
-                " access — xAI may be restricting API/OAuth use to"
-                " specific SuperGrok tiers despite the in-app"
-                " subscription being active. Re-logging in won't"
-                " change that; set ``XAI_API_KEY`` and switch to"
-                " ``provider: xai`` (API-key path) if available, or"
-                " upgrade your subscription at https://x.ai/grok.",
+                  " access — xAI may be restricting API/OAuth use to"
+                  " specific SuperGrok tiers despite the in-app"
+                  " subscription being active. Re-logging in won't"
+                  " change that; set ``XAI_API_KEY`` and switch to"
+                  " ``provider: xai`` (API-key path) if available, or"
+                  " upgrade your subscription at https://x.ai/grok.",
                 provider="xai-oauth",
                 code="xai_oauth_tier_denied",
                 relogin_required=False,
             )
         raise AuthError(
-            "xAI token refresh failed." + (f" Response: {detail}" if detail else ""),
+            "xAI token refresh failed."
+            + (f" Response: {detail}" if detail else ""),
             provider="xai-oauth",
             code="xai_refresh_failed",
             relogin_required=(response.status_code in {400, 401}),
@@ -4534,13 +4450,13 @@ def resolve_xai_oauth_runtime_credentials(
                             _save_auth_store(_q_store)
                         except Exception as _save_exc:
                             logger.debug(
-                                "xAI OAuth: failed to persist quarantined state: %s",
-                                _save_exc,
+                                "xAI OAuth: failed to persist quarantined state: %s", _save_exc,
                             )
                     raise
 
     base_url = _xai_validate_inference_base_url(
-        os.getenv("HERMES_XAI_BASE_URL", "").strip().rstrip("/") or os.getenv("XAI_BASE_URL", "").strip().rstrip("/"),
+        os.getenv("HERMES_XAI_BASE_URL", "").strip().rstrip("/")
+        or os.getenv("XAI_BASE_URL", "").strip().rstrip("/"),
         fallback=DEFAULT_XAI_OAUTH_BASE_URL,
     )
     return {
@@ -4557,7 +4473,6 @@ def resolve_xai_oauth_runtime_credentials(
 # TLS verification helper
 # =============================================================================
 
-
 def _default_verify() -> bool | ssl.SSLContext:
     """Platform-aware default SSL verify for httpx clients.
 
@@ -4570,7 +4485,6 @@ def _default_verify() -> bool | ssl.SSLContext:
     if sys.platform == "darwin":
         try:
             import certifi
-
             return ssl.create_default_context(cafile=certifi.where())
         except ImportError:
             pass
@@ -4587,8 +4501,7 @@ def _resolve_verify(
     tls_state = tls_state if isinstance(tls_state, dict) else {}
 
     effective_insecure = (
-        is_truthy_value(insecure, default=False)
-        if insecure is not None
+        is_truthy_value(insecure, default=False) if insecure is not None
         else is_truthy_value(tls_state.get("insecure", False), default=False)
     )
     effective_ca = (
@@ -4617,7 +4530,6 @@ def _resolve_verify(
 # OAuth Device Code Flow — generic, parameterized by provider
 # =============================================================================
 
-
 def _request_device_code(
     client: httpx.Client,
     portal_base_url: str,
@@ -4636,12 +4548,8 @@ def _request_device_code(
     data = response.json()
 
     required_fields = [
-        "device_code",
-        "user_code",
-        "verification_uri",
-        "verification_uri_complete",
-        "expires_in",
-        "interval",
+        "device_code", "user_code", "verification_uri",
+        "verification_uri_complete", "expires_in", "interval",
     ]
     missing = [f for f in required_fields if f not in data]
     if missing:
@@ -4742,7 +4650,6 @@ def _nous_shared_auth_dir() -> Path:
     if override:
         return Path(override).expanduser()
     from hermes_constants import get_default_hermes_root
-
     return get_default_hermes_root() / "shared"
 
 
@@ -4756,8 +4663,9 @@ def _nous_shared_store_path() -> Path:
     # shared store).
     if os.environ.get("PYTEST_CURRENT_TEST"):
         from hermes_constants import get_default_hermes_root
-
-        real_home_shared = (get_default_hermes_root() / "shared" / NOUS_SHARED_STORE_FILENAME).resolve(strict=False)
+        real_home_shared = (
+            get_default_hermes_root() / "shared" / NOUS_SHARED_STORE_FILENAME
+        ).resolve(strict=False)
         try:
             resolved = path.resolve(strict=False)
         except Exception:
@@ -4983,8 +4891,7 @@ def _is_terminal_codex_oauth_refresh_error(exc: Exception) -> bool:
     return (
         isinstance(exc, AuthError)
         and exc.provider == "openai-codex"
-        and exc.code
-        in {
+        and exc.code in {
             "codex_refresh_failed",
             "codex_auth_missing_refresh_token",
             "invalid_grant",
@@ -5151,15 +5058,15 @@ def _refresh_access_token(
     if response.status_code == 200:
         payload = response.json()
         if "access_token" not in payload:
-            raise AuthError(
-                "Refresh response missing access_token", provider="nous", code="invalid_token", relogin_required=True
-            )
+            raise AuthError("Refresh response missing access_token",
+                            provider="nous", code="invalid_token", relogin_required=True)
         return payload
 
     try:
         error_payload = response.json()
     except Exception as exc:
-        raise AuthError("Refresh token exchange failed", provider="nous", relogin_required=True) from exc
+        raise AuthError("Refresh token exchange failed",
+                        provider="nous", relogin_required=True) from exc
 
     code = str(error_payload.get("error", "invalid_grant"))
     description = str(error_payload.get("error_description") or "Refresh token exchange failed")
@@ -5455,7 +5362,9 @@ def refresh_nous_oauth_pure(
             state["inference_base_url"] = refreshed_url or DEFAULT_NOUS_INFERENCE_URL
             state["obtained_at"] = now.isoformat()
             state["expires_in"] = access_ttl
-            state["expires_at"] = datetime.fromtimestamp(now.timestamp() + access_ttl, tz=timezone.utc).isoformat()
+            state["expires_at"] = datetime.fromtimestamp(
+                now.timestamp() + access_ttl, tz=timezone.utc
+            ).isoformat()
             if on_state_update is not None:
                 on_state_update(dict(state), "post_refresh_access_token")
 
@@ -5586,7 +5495,8 @@ def resolve_nous_runtime_credentials(
         state = _load_provider_state(auth_store, "nous")
 
         if not state:
-            raise AuthError("Hermes is not logged into Nous Portal.", provider="nous", relogin_required=True)
+            raise AuthError("Hermes is not logged into Nous Portal.",
+                            provider="nous", relogin_required=True)
 
         persisted_state = dict(state)
         state_persisted = False
@@ -5608,7 +5518,10 @@ def resolve_nous_runtime_credentials(
             nonlocal persisted_state, state_persisted
             # Skip writes where only derived TTL countdowns changed; this keeps
             # the mtime-keyed Nous auth-status cache warm during read paths.
-            if _nous_effective_provider_state(state) == _nous_effective_provider_state(persisted_state):
+            if (
+                _nous_effective_provider_state(state)
+                == _nous_effective_provider_state(persisted_state)
+            ):
                 _oauth_trace(
                     "nous_state_persist_skipped",
                     sequence_id=sequence_id,
@@ -5654,7 +5567,8 @@ def resolve_nous_runtime_credentials(
             refresh_token = state.get("refresh_token")
 
             if not isinstance(access_token, str) or not access_token:
-                raise AuthError("No access token found for Nous Portal login.", provider="nous", relogin_required=True)
+                raise AuthError("No access token found for Nous Portal login.",
+                                provider="nous", relogin_required=True)
 
             invoke_jwt_status = _nous_invoke_jwt_status(
                 access_token,
@@ -5694,10 +5608,8 @@ def resolve_nous_runtime_credentials(
                         )
                         try:
                             refreshed = _refresh_access_token(
-                                client=client,
-                                portal_base_url=portal_base_url,
-                                client_id=client_id,
-                                refresh_token=refresh_token,
+                                client=client, portal_base_url=portal_base_url,
+                                client_id=client_id, refresh_token=refresh_token,
                             )
                         except AuthError as exc:
                             if _is_terminal_nous_refresh_error(exc):
@@ -5770,7 +5682,8 @@ def resolve_nous_runtime_credentials(
 
     api_key = state.get("agent_key")
     if not isinstance(api_key, str) or not api_key:
-        raise AuthError("Failed to resolve a Nous inference API key", provider="nous", code="server_error")
+        raise AuthError("Failed to resolve a Nous inference API key",
+                        provider="nous", code="server_error")
 
     expires_at = state.get("agent_key_expires_at")
     expires_epoch = _parse_iso_timestamp(expires_at)
@@ -5795,7 +5708,6 @@ def resolve_nous_runtime_credentials(
 # =============================================================================
 # Status helpers
 # =============================================================================
-
 
 def _empty_nous_auth_status() -> Dict[str, Any]:
     return {
@@ -5840,11 +5752,16 @@ def _snapshot_nous_pool_status() -> Dict[str, Any]:
         access_token = getattr(entry, "access_token", None)
         auth_type = str(getattr(entry, "auth_type", "") or "").strip().lower()
         refresh_token = getattr(entry, "refresh_token", None)
-        is_portal_oauth = bool(access_token) and (auth_type.startswith("oauth") or bool(refresh_token))
+        is_portal_oauth = bool(access_token) and (
+            auth_type.startswith("oauth") or bool(refresh_token)
+        )
         label = getattr(entry, "label", "unknown")
         portal_status_url = None
         if is_portal_oauth:
-            portal_status_url = getattr(entry, "portal_base_url", None) or DEFAULT_NOUS_PORTAL_URL
+            portal_status_url = (
+                getattr(entry, "portal_base_url", None)
+                or DEFAULT_NOUS_PORTAL_URL
+            )
 
         return {
             "logged_in": is_portal_oauth,
@@ -5948,29 +5865,33 @@ def _compute_nous_auth_status() -> Dict[str, Any]:
             "agent_key_expires_at": state.get("agent_key_expires_at"),
             "has_refresh_token": bool(state.get("refresh_token")),
             "access_token": state.get("access_token"),
-            "inference_credential_present": bool(state.get("access_token") or state.get("agent_key")),
+            "inference_credential_present": bool(
+                state.get("access_token") or state.get("agent_key")
+            ),
             "credential_source": "auth_store",
             "source": "auth_store",
         }
         try:
             creds = resolve_nous_runtime_credentials()
             refreshed_state = get_provider_auth_state("nous") or state
-            base_status.update({
-                "logged_in": True,
-                "portal_base_url": refreshed_state.get("portal_base_url") or base_status.get("portal_base_url"),
-                "inference_base_url": creds.get("base_url")
-                or refreshed_state.get("inference_base_url")
-                or base_status.get("inference_base_url"),
-                "access_expires_at": refreshed_state.get("expires_at") or base_status.get("access_expires_at"),
-                "agent_key_expires_at": creds.get("expires_at")
-                or refreshed_state.get("agent_key_expires_at")
-                or base_status.get("agent_key_expires_at"),
-                "has_refresh_token": bool(refreshed_state.get("refresh_token")),
-                "inference_credential_present": True,
-                "credential_source": "auth_store",
-                "source": f"runtime:{creds.get('source', 'portal')}",
-                "key_id": creds.get("key_id"),
-            })
+            base_status.update(
+                {
+                    "logged_in": True,
+                    "portal_base_url": refreshed_state.get("portal_base_url") or base_status.get("portal_base_url"),
+                    "inference_base_url": creds.get("base_url")
+                    or refreshed_state.get("inference_base_url")
+                    or base_status.get("inference_base_url"),
+                    "access_expires_at": refreshed_state.get("expires_at") or base_status.get("access_expires_at"),
+                    "agent_key_expires_at": creds.get("expires_at")
+                    or refreshed_state.get("agent_key_expires_at")
+                    or base_status.get("agent_key_expires_at"),
+                    "has_refresh_token": bool(refreshed_state.get("refresh_token")),
+                    "inference_credential_present": True,
+                    "credential_source": "auth_store",
+                    "source": f"runtime:{creds.get('source', 'portal')}",
+                    "key_id": creds.get("key_id"),
+                }
+            )
             return base_status
         except AuthError as exc:
             base_status.update({
@@ -5986,7 +5907,7 @@ def _compute_nous_auth_status() -> Dict[str, Any]:
 
 def get_codex_auth_status() -> Dict[str, Any]:
     """Status snapshot for Codex auth.
-
+    
     Checks the credential pool first (where `hermes auth` stores credentials),
     then falls back to the legacy provider state.
     """
@@ -6152,13 +6073,6 @@ def get_external_process_provider_status(provider_id: str) -> Dict[str, Any]:
     }
 
 
-def get_vertex_auth_status() -> Dict[str, Any]:
-    """Return auth status for Vertex AI."""
-    from agent.vertex_adapter import get_vertex_credentials
-    token, _ = get_vertex_credentials()
-    return {"logged_in": bool(token), "provider": "vertex"}
-
-
 def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
     """Generic auth status dispatcher."""
     target = (provider_id or get_active_provider() or "").strip().lower()
@@ -6178,8 +6092,6 @@ def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
         return get_minimax_oauth_auth_status()
     if target == "copilot-acp":
         return get_external_process_provider_status(target)
-    if target == "vertex":
-        return get_vertex_auth_status()
     if target == "azure-foundry":
         return _get_azure_foundry_auth_status()
     # API-key providers
@@ -6319,12 +6231,7 @@ def resolve_api_key_provider_credentials(provider_id: str) -> Dict[str, Any]:
 
 
 def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str, Any]:
-    """Resolve runtime details for local subprocess-backed providers.
-
-    For ACP agents (provider IDs ending in ``-acp``), the command is resolved
-    from the ACP agent registry.  For the legacy ``copilot-acp`` provider,
-    the original env-var resolution is preserved for backwards compatibility.
-    """
+    """Resolve runtime details for local subprocess-backed providers."""
     pconfig = PROVIDER_REGISTRY.get(provider_id)
     if not pconfig or pconfig.auth_type != "external_process":
         raise AuthError(
@@ -6337,25 +6244,6 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
     if not base_url:
         base_url = pconfig.inference_base_url
 
-    # Derive agent name from provider id: "claude-acp" -> "claude"
-    agent_name = provider_id.removesuffix("-acp") if provider_id.endswith("-acp") else ""
-
-    # Try the generalized ACP agent registry first
-    if agent_name:
-        from agent.acp_agent_registry import resolve_agent_command, split_agent_command
-        agent_cmd = resolve_agent_command(agent_name)
-        if agent_cmd:
-            argv = split_agent_command(agent_cmd)
-            return {
-                "provider": provider_id,
-                "api_key": f"{agent_name}-acp",
-                "base_url": base_url.rstrip("/"),
-                "command": argv[0],
-                "args": argv[1:],
-                "source": "process",
-            }
-
-    # Legacy copilot-specific resolution (backwards compat)
     command = (
         os.getenv("HERMES_COPILOT_ACP_COMMAND", "").strip()
         or os.getenv("COPILOT_CLI_PATH", "").strip()
@@ -6366,41 +6254,21 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
     resolved_command = shutil.which(command) if command else None
     if not resolved_command and not base_url.startswith("acp+tcp://"):
         raise AuthError(
-            f"Could not find the ACP agent command '{command}' for provider '{provider_id}'. "
-            f"Install the agent or set HERMES_ACP_{agent_name.upper().replace('-', '_')}_COMMAND.",
+            f"Could not find the Copilot CLI command '{command}'. "
+            "Install GitHub Copilot CLI or set HERMES_COPILOT_ACP_COMMAND/COPILOT_CLI_PATH.",
             provider=provider_id,
-            code="missing_acp_cli",
+            code="missing_copilot_cli",
         )
 
     return {
         "provider": provider_id,
-        "api_key": f"{agent_name or provider_id}-acp",
+        "api_key": "copilot-acp",
         "base_url": base_url.rstrip("/"),
         "command": resolved_command or command,
         "args": args,
         "source": "process",
     }
 
-
-def resolve_vertex_runtime_credentials(
-    credentials_path: Optional[str] = None,
-    region: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Resolve (access_token, base_url) for Vertex AI."""
-    from agent.vertex_adapter import get_vertex_config
-    token, base_url = get_vertex_config(credentials_path, region)
-    if not token or not base_url:
-        raise AuthError(
-            "Vertex AI credentials not found. Set VERTEX_CREDENTIALS_PATH or GOOGLE_APPLICATION_CREDENTIALS.",
-            provider="vertex",
-            code="missing_vertex_creds",
-        )
-    return {
-        "provider": "vertex",
-        "api_key": token,
-        "base_url": base_url,
-        "source": "vertex_adapter",
-    }
 
 # =============================================================================
 # CLI Commands — login / logout

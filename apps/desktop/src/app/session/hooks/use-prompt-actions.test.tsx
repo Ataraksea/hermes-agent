@@ -3,14 +3,11 @@ import type { MutableRefObject } from 'react'
 import { useEffect, useRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { $rightSidebarTab } from '@/app/right-sidebar/store'
 import { textPart } from '@/lib/chat-messages'
 import { $composerAttachments, type ComposerAttachment } from '@/store/composer'
-import { $fileBrowserOpen, setFileBrowserOpen } from '@/store/layout'
 import { $busy, $connection, $messages, $sessions, setSessions } from '@/store/session'
 import type { SessionInfo } from '@/types/hermes'
 
-import type { ClientSessionState } from '../../types'
 import { uploadComposerAttachment, usePromptActions } from './use-prompt-actions'
 
 vi.mock('@/hermes', () => ({
@@ -79,7 +76,7 @@ function Harness({
     current: storedSessionId === undefined ? RUNTIME_SESSION_ID : storedSessionId
   }
   const localBusyRef = busyRef ?? { current: false }
-  const sessionStateRef = useRef<ClientSessionState>({
+  const stateRef = useRef({
     messages: seedMessages ?? [],
     busy: false,
     awaitingResponse: false,
@@ -100,13 +97,12 @@ function Harness({
     startFreshSessionDraft: () => undefined,
     sttEnabled: false,
     updateSessionState: (_sessionId, updater) => {
-      // Seed with interrupted:true so we can prove a fresh submit clears it,
-      // and keep later updates chained like the real store does.
-      const next = updater(sessionStateRef.current)
-      sessionStateRef.current = next
-      onSeedState?.(next as unknown as Record<string, unknown>)
+      // Seed with interrupted:true so we can prove a fresh submit clears it.
+      const next = updater(stateRef.current) as unknown as Record<string, unknown>
+      stateRef.current = next as never
+      onSeedState?.(next)
 
-      return next
+      return next as never
     }
   })
 
@@ -329,38 +325,6 @@ describe('usePromptActions desktop slash pickers', () => {
         session_id: RUNTIME_SESSION_ID
       }
     })
-  })
-})
-
-describe('usePromptActions /kanban', () => {
-  beforeEach(() => {
-    setFileBrowserOpen(false)
-    $rightSidebarTab.set('files')
-  })
-
-  afterEach(() => {
-    cleanup()
-    setFileBrowserOpen(false)
-    $rightSidebarTab.set('files')
-    vi.restoreAllMocks()
-  })
-
-  it('routes /kanban through the slash worker in desktop chat and reveals the kanban sidebar', async () => {
-    const requestGateway = vi.fn(async (method: string) =>
-      (method === 'slash.exec' ? { output: 'todo 3\nrunning 1' } : {}) as never
-    )
-
-    let handle: HarnessHandle | null = null
-    render(<Harness onReady={h => (handle = h)} refreshSessions={async () => undefined} requestGateway={requestGateway} />)
-
-    await handle!.submitText('/kanban list')
-
-    expect(requestGateway).toHaveBeenCalledWith('slash.exec', {
-      session_id: RUNTIME_SESSION_ID,
-      command: 'kanban list'
-    })
-    expect($fileBrowserOpen.get()).toBe(true)
-    expect($rightSidebarTab.get()).toBe('kanban')
   })
 })
 

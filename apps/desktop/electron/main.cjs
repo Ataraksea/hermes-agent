@@ -36,7 +36,6 @@ const {
 const { canImportHermesCli, verifyHermesCli } = require('./backend-probes.cjs')
 const { createLinkTitleWindow } = require('./link-title-window.cjs')
 const { probeGatewayWebSocket } = require('./gateway-ws-probe.cjs')
-const { waitForRemoteHermes } = require('./remote-readiness.cjs')
 const { adoptServedDashboardToken } = require('./dashboard-token.cjs')
 const { waitForDashboardPort } = require('./backend-ready.cjs')
 const { serializeJsonBody, setJsonRequestHeaders } = require('./oauth-net-request.cjs')
@@ -4880,14 +4879,7 @@ async function spawnPoolBackend(profile, entry) {
   // tolerate.
   const remote = await resolveRemoteBackend(profile)
   if (remote) {
-    const readiness = await waitForRemoteHermes(remote, {
-      fetchJson,
-      mintTicket: mintGatewayWsTicket,
-      WebSocketImpl: globalThis.WebSocket
-    })
-    if (readiness?.wsUrl) {
-      remote.wsUrl = readiness.wsUrl
-    }
+    await waitForHermes(remote.baseUrl, remote.token)
     return {
       ...remote,
       profile,
@@ -5079,14 +5071,7 @@ async function startHermes() {
     const remote = await resolveRemoteBackend(primaryProfileKey())
     if (remote) {
       await advanceBootProgress('backend.remote', `Connecting to remote Hermes backend at ${remote.baseUrl}`, 24)
-      const readiness = await waitForRemoteHermes(remote, {
-        fetchJson,
-        mintTicket: mintGatewayWsTicket,
-        WebSocketImpl: globalThis.WebSocket
-      })
-      if (readiness?.wsUrl) {
-        remote.wsUrl = readiness.wsUrl
-      }
+      await waitForHermes(remote.baseUrl, remote.token)
       updateBootProgress({
         phase: 'backend.ready',
         message: 'Remote Hermes backend is ready',

@@ -349,39 +349,6 @@ def test_build_api_kwargs_codex_clamps_minimal_effort(monkeypatch):
     assert kwargs["reasoning"]["effort"] == "low"
 
 
-def test_build_api_kwargs_codex_clamps_max_effort(monkeypatch):
-    """'max' reasoning effort is clamped to 'high' on the Responses API.
-
-    'max' is an Anthropic-only effort level. GPT-5.4 / Grok accept up to
-    'xhigh'/'high' on the Responses 'effort' field, so the Codex Responses
-    path must clamp 'max' to 'high' to avoid a 400.
-    """
-    _patch_agent_bootstrap(monkeypatch)
-
-    agent = run_agent.AIAgent(
-        model="gpt-5-codex",
-        base_url="https://chatgpt.com/backend-api/codex",
-        api_key="codex-token",
-        quiet_mode=True,
-        max_iterations=4,
-        skip_context_files=True,
-        skip_memory=True,
-        reasoning_config={"enabled": True, "effort": "max"},
-    )
-    agent._cleanup_task_resources = lambda task_id: None
-    agent._persist_session = lambda messages, history=None: None
-    agent._save_trajectory = lambda messages, user_message, completed: None
-
-    kwargs = agent._build_api_kwargs(
-        [
-            {"role": "system", "content": "You are Hermes."},
-            {"role": "user", "content": "Ping"},
-        ]
-    )
-
-    assert kwargs["reasoning"]["effort"] == "high"
-
-
 def test_build_api_kwargs_codex_preserves_supported_efforts(monkeypatch):
     """Effort levels natively supported by the Responses API pass through unchanged."""
     _patch_agent_bootstrap(monkeypatch)
@@ -733,34 +700,6 @@ def test_run_conversation_codex_plain_text(monkeypatch):
     assert result["final_response"] == "OK"
     assert result["messages"][-1]["role"] == "assistant"
     assert result["messages"][-1]["content"] == "OK"
-
-
-def test_run_conversation_codex_without_usage_keeps_context_meter(monkeypatch):
-    """Recovered Codex streams can lack usage; keep TUI context estimated."""
-    agent = _build_agent(monkeypatch)
-
-    def _response_without_usage(api_kwargs):
-        return SimpleNamespace(
-            output=[
-                SimpleNamespace(
-                    type="message",
-                    content=[SimpleNamespace(type="output_text", text="OK")],
-                )
-            ],
-            status="completed",
-            model="gpt-5-codex",
-        )
-
-    monkeypatch.setattr(agent, "_interruptible_api_call", _response_without_usage)
-
-    result = agent.run_conversation("Say OK")
-
-    assert result["completed"] is True
-    assert result["final_response"] == "OK"
-    compressor = getattr(agent, "context_compressor")
-    assert compressor.last_prompt_tokens > 0
-    assert agent.session_prompt_tokens == 0
-    assert agent.session_total_tokens == 0
 
 
 def test_run_conversation_codex_empty_output_with_output_text(monkeypatch):
