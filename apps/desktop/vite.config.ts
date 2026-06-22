@@ -5,6 +5,17 @@ import path from 'path'
 
 export default defineConfig({
   base: './',
+  // Pin `root` to this config's own directory. On installs where the Hermes
+  // tree is reached through a junction/symlink (e.g. Windows
+  // `C:\Users\<name>\AppData\Local\hermes` → `D:\AppData\Local\hermes`), Node
+  // resolves `__dirname` to the real target drive while the process cwd stays
+  // on the junction drive. Without an explicit root, Vite derives root from
+  // cwd (`C:\…`) but the HTML entry resolves through `__dirname` (`D:\…`); the
+  // two land on different drives, so rolldown can't compute a relative path for
+  // `index.html` and aborts the build ("fileName … must not be absolute nor
+  // relative"). Anchoring both root and the HTML input to `__dirname` keeps
+  // them on the same drive and makes the build hermetic.
+  root: __dirname,
   plugins: [react(), tailwindcss()],
   css: {
     // Pin an explicit (empty) PostCSS config. Tailwind is handled entirely by
@@ -28,6 +39,10 @@ export default defineConfig({
     // as a regression alarm if the bundle balloons well past today's size.
     chunkSizeWarningLimit: 25000,
     rolldownOptions: {
+      // Anchor the HTML entry to the same drive as `root` (see the `root`
+      // note above) so junction/symlink installs don't trip rolldown's
+      // relative-path computation.
+      input: path.resolve(__dirname, 'index.html'),
       output: {
         codeSplitting: false
       }
