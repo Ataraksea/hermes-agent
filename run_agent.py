@@ -66,6 +66,11 @@ from types import SimpleNamespace
 
 from hermes_constants import get_hermes_home
 
+from agent.tool_dispatch_helpers import (
+    _is_multimodal_tool_result,
+    _multimodal_text_summary
+)
+
 
 def _launch_cwd_for_session(source: str) -> Optional[str]:
     """Working directory to stamp on a new session row, or None.
