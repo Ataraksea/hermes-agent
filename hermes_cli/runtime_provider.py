@@ -26,8 +26,6 @@ from hermes_cli.auth import (
     resolve_codex_runtime_credentials,
     resolve_xai_oauth_runtime_credentials,
     resolve_qwen_runtime_credentials,
-    resolve_gemini_oauth_runtime_credentials,
-    resolve_antigravity_oauth_runtime_credentials,
     resolve_api_key_provider_credentials,
     resolve_external_process_provider_credentials,
     resolve_vertex_runtime_credentials,
@@ -338,12 +336,6 @@ def _resolve_runtime_from_pool_entry(
     elif provider == "qwen-oauth":
         api_mode = "chat_completions"
         base_url = base_url or DEFAULT_QWEN_BASE_URL
-    elif provider == "google-gemini-cli":
-        api_mode = "chat_completions"
-        base_url = base_url or "cloudcode-pa://google"
-    elif provider == "google-antigravity":
-        api_mode = "chat_completions"
-        base_url = base_url or "antigravity-pa://google"
     elif provider == "minimax-oauth":
         # MiniMax OAuth tokens are valid only against the Anthropic Messages
         # compatible endpoint. Do not honor stale model.api_mode values from a
@@ -1682,15 +1674,15 @@ def resolve_runtime_provider(
                 "requested_provider": requested_provider,
             }
 
-    if provider == "google-gemini-cli":
+    if provider == "google-antigravity":
         try:
-            creds = resolve_gemini_oauth_runtime_credentials()
+            creds = resolve_antigravity_oauth_runtime_credentials()
             return {
-                "provider": "google-gemini-cli",
+                "provider": "google-antigravity",
                 "api_mode": "chat_completions",
                 "base_url": creds.get("base_url", ""),
                 "api_key": creds.get("api_key", ""),
-                "source": creds.get("source", "google-oauth"),
+                "source": creds.get("source", "antigravity-oauth"),
                 "expires_at_ms": creds.get("expires_at_ms"),
                 "email": creds.get("email", ""),
                 "project_id": creds.get("project_id", ""),
@@ -1699,7 +1691,7 @@ def resolve_runtime_provider(
         except AuthError:
             if requested_provider != "auto":
                 raise
-            logger.info("Google Gemini OAuth credentials failed; "
+            logger.info("Google Antigravity OAuth credentials failed; "
                         "falling through to next provider.")
 
     # ACP agent providers (external_process auth type)

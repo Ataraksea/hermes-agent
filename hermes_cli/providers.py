@@ -76,25 +76,6 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         base_url_override="https://portal.qwen.ai/v1",
         base_url_env_var="HERMES_QWEN_BASE_URL",
     ),
-    "google-gemini-cli": HermesOverlay(
-        transport="openai_chat",
-        auth_type="oauth_external",
-        base_url_override="cloudcode-pa://google",
-    ),
-    "google-antigravity": HermesOverlay(
-        transport="openai_chat",
-        auth_type="oauth_external",
-        base_url_override="antigravity-pa://google",
-    ),
-    "vertex": HermesOverlay(
-        transport="openai_chat",
-        auth_type="vertex",
-        extra_env_vars=(
-            "VERTEX_CREDENTIALS_PATH",
-            "GOOGLE_APPLICATION_CREDENTIALS",
-            "VERTEX_PROJECT_ID",
-        ),
-    ),
     "lmstudio": HermesOverlay(
         transport="openai_chat",
         auth_type="api_key",
@@ -293,6 +274,15 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         transport="bedrock_converse",
         auth_type="aws_sdk",
     ),
+    "vertex": HermesOverlay(
+        transport="openai_chat",
+        auth_type="vertex",
+        extra_env_vars=(
+            "VERTEX_CREDENTIALS_PATH",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "VERTEX_PROJECT_ID",
+        ),
+    ),
 }
 
 
@@ -392,21 +382,6 @@ ALIASES: Dict[str, str] = {
     "alibaba-coding": "alibaba-coding-plan",
     "alibaba_coding_plan": "alibaba-coding-plan",
 
-    # google-gemini-cli (OAuth + Code Assist)
-    "gemini-cli": "google-gemini-cli",
-    "gemini-oauth": "google-gemini-cli",
-
-    # google-antigravity (OAuth + Antigravity Code Assist)
-    "antigravity": "google-antigravity",
-    "antigravity-oauth": "google-antigravity",
-    "antigravity-cli": "google-antigravity",
-    "google-antigravity-oauth": "google-antigravity",
-    "agy": "google-antigravity",
-    "agy-cli": "google-antigravity",
-    # google vertex
-    "vertex-ai": "vertex",
-    "google-vertex": "vertex",
-
     # huggingface
     "hf": "huggingface",
     "hugging-face": "huggingface",
@@ -449,6 +424,10 @@ ALIASES: Dict[str, str] = {
     "llamacpp": "local",
     "llama.cpp": "local",
     "llama-cpp": "local",
+
+    # google vertex
+    "vertex-ai": "vertex",
+    "google-vertex": "vertex",
 }
 
 
