@@ -195,10 +195,23 @@ def _check_fn_cached(fn: Callable) -> bool:
             )
             return True
 
-        # No recent success (or grace expired) — honor the failure. Log it so
-        # silent tool loss in quiet mode (subagents) is diagnosable.
-        logger.warning(
-            "check_fn %s %s; dependent tools will be unavailable this turn",
+        # No recent success (or grace expired) — honor the failure. A gate
+        # returning False is the *designed* steady state for an optional/gated
+        # tool whose prerequisite isn't present (no CDP browser connection, not
+        # running in the desktop GUI, kanban toolset not enabled, no HASS
+        # token, ...). That is not an anomaly, so it is logged at DEBUG here,
+        # NOT WARNING: firing a warning on every cache-miss turn for tools the
+        # user never intended to use just trains people to ignore the log.
+        #
+        # Diagnosability is preserved where it matters: the availability path
+        # in get_definitions() knows the tool name and elevates to WARNING for
+        # exactly the tools/toolsets the user opted into via
+        # logging.warn_unavailable_tools (capabilities they actively depend on
+        # and want flagged when missing). Contrast the transient-flake branch
+        # above, which stays WARNING because a probe failing shortly after a
+        # success is a genuine instability signal, not an expected gate.
+        logger.debug(
+            "check_fn %s %s; dependent tools unavailable this turn",
             getattr(fn, "__qualname__", fn),
             "raised" if raised else "returned False",
         )
@@ -527,7 +540,12 @@ class ToolRegistry:
     # Schema retrieval
     # ------------------------------------------------------------------
 
-    def get_definitions(self, tool_names: Set[str], quiet: bool = False) -> List[dict]:
+    def get_definitions(
+        self,
+        tool_names: Set[str],
+        quiet: bool = False,
+        warn_unavailable: Optional[Set[str]] = None,
+    ) -> List[dict]:
         """Return OpenAI-format tool schemas for the requested tool names.
 
         Only tools whose ``check_fn()`` returns True (or have no check_fn)
@@ -537,6 +555,14 @@ class ToolRegistry:
         etc.); TTL chosen so env-var changes (``hermes tools enable foo``)
         still take effect in near-real-time without forcing a full cache
         flush on every call.
+
+        ``warn_unavailable`` is an optional set of tool names and/or toolset
+        names the caller wants surfaced at WARNING level when they're gated
+        out (from ``logging.warn_unavailable_tools`` in config). A tool being
+        hidden by a failed ``check_fn`` is normally the expected, quiet case
+        (DEBUG); listing it here means the user actively depends on it and
+        wants to be told when it drops out. The elevated warning fires even
+        under ``quiet`` — that's the whole point of opting in.
         """
         result = []
         # Per-call cache on top of the 30 s TTL — handles repeat probes of the
@@ -552,7 +578,27 @@ class ToolRegistry:
                 if entry.check_fn not in check_results:
                     check_results[entry.check_fn] = _check_fn_cached(entry.check_fn)
                 if not check_results[entry.check_fn]:
-                    if not quiet:
+                    # A failed check_fn means the tool's prerequisite isn't
+                    # present. That's the expected, quiet path (DEBUG) for an
+                    # unconfigured optional capability. Elevate to WARNING only
+                    # for the specific tools/toolsets the user opted into via
+                    # logging.warn_unavailable_tools — the ones they actively
+                    # depend on and want flagged when missing.
+                    if warn_unavailable and (
+                        name in warn_unavailable
+                        or entry.toolset in warn_unavailable
+                    ):
+                        logger.warning(
+                            "Tool %s (toolset %s) is unavailable: its check_fn "
+                            "(%s) returned False. You asked to be warned about "
+                            "this via logging.warn_unavailable_tools — the tool "
+                            "is hidden from the agent this turn because its "
+                            "prerequisite isn't present.",
+                            name,
+                            entry.toolset,
+                            getattr(entry.check_fn, "__qualname__", entry.check_fn),
+                        )
+                    elif not quiet:
                         logger.debug("Tool %s unavailable (check failed)", name)
                     continue
             # Ensure schema always has a "name" field — use entry.name as fallback

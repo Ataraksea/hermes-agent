@@ -3037,6 +3037,17 @@ DEFAULT_CONFIG = {
         "level": "INFO",       # Minimum level for agent.log: DEBUG, INFO, WARNING
         "max_size_mb": 5,      # Max size per log file before rotation
         "backup_count": 3,     # Number of rotated backup files to keep
+        # Tools (or whole toolsets) you actively depend on and want flagged
+        # when they drop out of the agent's schema. A tool is hidden when its
+        # availability check (check_fn) fails — e.g. no CDP browser connection,
+        # not running in the desktop GUI, the kanban toolset isn't enabled, or
+        # a required token is missing. That is the normal, expected state for
+        # optional capabilities, so it is logged at DEBUG and stays out of the
+        # way. List a tool name (e.g. "read_terminal") or a toolset name (e.g.
+        # "kanban", "browser-cdp") here to elevate its "unavailable" log line
+        # to WARNING, so you're told when a capability you rely on isn't
+        # present. Empty by default — no availability warnings.
+        "warn_unavailable_tools": [],
     },
 
     # Remotely-hosted model catalog manifest.  When enabled, the CLI fetches

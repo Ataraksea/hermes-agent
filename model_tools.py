@@ -285,6 +285,33 @@ def _clear_tool_defs_cache() -> None:
     _tool_defs_cache.clear()
 
 
+def _get_warn_unavailable_tools() -> Optional[set]:
+    """Tool/toolset names the user asked to be WARNED about when unavailable.
+
+    Read from ``logging.warn_unavailable_tools`` in config.yaml. Returns a set
+    of names matched (in :meth:`ToolRegistry.get_definitions`) against both the
+    tool name and its toolset, or ``None`` when unset/empty.
+
+    A tool hidden by a failed ``check_fn`` is normally logged at DEBUG — an
+    unconfigured optional capability (no browser CDP connection, not in the
+    desktop GUI, kanban toolset off, ...) is the expected, quiet case. Names in
+    this list are elevated to WARNING so a user who actively depends on a gated
+    capability is told when it drops out. Never raises: a config read failure
+    just means "no elevation".
+    """
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+        raw = (cfg.get("logging") or {}).get("warn_unavailable_tools") or []
+        if isinstance(raw, str):
+            raw = [raw]
+        names = {str(x).strip() for x in raw if str(x).strip()}
+        return names or None
+    except Exception:
+        return None
+
+
 def get_tool_definitions(
     enabled_toolsets: Optional[List[str]] = None,
     disabled_toolsets: Optional[List[str]] = None,
@@ -455,8 +482,16 @@ def _compute_tool_definitions(
     # needed; plugins respect enabled_toolsets / disabled_toolsets like any
     # other toolset.
 
-    # Ask the registry for schemas (only returns tools whose check_fn passes)
-    filtered_tools = registry.get_definitions(tools_to_include, quiet=quiet_mode)
+    # Ask the registry for schemas (only returns tools whose check_fn passes).
+    # A tool being gated out by its check_fn is normal (an unconfigured
+    # optional capability) and logged at DEBUG. Users who actively depend on a
+    # gated tool can opt it into WARNING-level "this is missing" logging via
+    # logging.warn_unavailable_tools so they're told when it drops out.
+    filtered_tools = registry.get_definitions(
+        tools_to_include,
+        quiet=quiet_mode,
+        warn_unavailable=_get_warn_unavailable_tools(),
+    )
 
     # The set of tool names that actually passed check_fn filtering.
     # Use this (not tools_to_include) for any downstream schema that references

@@ -1,6 +1,7 @@
 """Tests for the central tool registry."""
 
 import json
+import logging
 import threading
 from pathlib import Path
 from unittest.mock import patch
@@ -174,6 +175,69 @@ class TestGetDefinitions:
         defs = reg.get_definitions({"first", "second"})
         assert len(defs) == 2
         assert calls["count"] == 1
+
+
+class TestUnavailableToolLogging:
+    """A gated-out tool is a normal, expected state — it must NOT warn by
+    default. Only tools/toolsets the user explicitly opts into via
+    logging.warn_unavailable_tools escalate to WARNING. (Regression guard for
+    the log-noise fix: six core-bundle check_fns firing WARNING every turn.)"""
+
+    def _register_gated(self, reg, name="gated", toolset="opt"):
+        reg.register(
+            name=name,
+            toolset=toolset,
+            schema=_make_schema(name),
+            handler=_dummy_handler,
+            check_fn=lambda: False,
+        )
+
+    def test_unavailable_tool_is_quiet_by_default(self, caplog):
+        reg = ToolRegistry()
+        self._register_gated(reg)
+        with caplog.at_level(logging.DEBUG, logger="tools.registry"):
+            defs = reg.get_definitions({"gated"})
+        assert defs == []
+        # No availability line should be at WARNING or above.
+        assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+
+    def test_warns_when_tool_name_opted_in(self, caplog):
+        reg = ToolRegistry()
+        self._register_gated(reg, name="read_terminal", toolset="terminal")
+        with caplog.at_level(logging.WARNING, logger="tools.registry"):
+            defs = reg.get_definitions(
+                {"read_terminal"}, warn_unavailable={"read_terminal"}
+            )
+        assert defs == []
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert warnings, "expected a WARNING for an opted-in unavailable tool"
+        assert any("read_terminal" in r.getMessage() for r in warnings)
+
+    def test_warns_when_toolset_opted_in(self, caplog):
+        reg = ToolRegistry()
+        self._register_gated(reg, name="kanban_show", toolset="kanban")
+        with caplog.at_level(logging.WARNING, logger="tools.registry"):
+            reg.get_definitions({"kanban_show"}, warn_unavailable={"kanban"})
+        assert any(
+            r.levelno >= logging.WARNING and "kanban_show" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_opt_in_does_not_warn_for_available_tool(self, caplog):
+        """Opting a tool in must not warn while it IS available — the warning
+        is about it being missing, not about being on the watch list."""
+        reg = ToolRegistry()
+        reg.register(
+            name="ready",
+            toolset="opt",
+            schema=_make_schema("ready"),
+            handler=_dummy_handler,
+            check_fn=lambda: True,
+        )
+        with caplog.at_level(logging.WARNING, logger="tools.registry"):
+            defs = reg.get_definitions({"ready"}, warn_unavailable={"ready"})
+        assert len(defs) == 1
+        assert not any(r.levelno >= logging.WARNING for r in caplog.records)
 
 
 class TestUnknownToolDispatch:
