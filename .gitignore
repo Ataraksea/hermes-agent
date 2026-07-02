@@ -185,3 +185,5 @@ infographics/
 infograficos/
 infografico/
 native/fts5_cjk/*.so
+.codegraph/codegraph.db
+.codegraph/daemon.log
