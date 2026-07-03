@@ -1130,12 +1130,24 @@ def build_turn_context(
         except Exception:
             pass
 
-    # External memory provider: prefetch once before the tool loop.
+    # External memory provider: recall once before the tool loop.
+    # With sync_recall enabled, do a live recall against the current message
+    # instead of consuming the previous turn's (possibly stale) background
+    # prefetch. See memory.sync_recall config.
     ext_prefetch_cache = ""
     if agent._memory_manager:
         try:
             _query = original_user_message if isinstance(original_user_message, str) else ""
-            ext_prefetch_cache = agent._memory_manager.prefetch_all(_query) or ""
+            if getattr(agent, "_memory_sync_recall", False):
+                ext_prefetch_cache = agent._memory_manager.recall_sync_all(
+                    _query,
+                    session_id=agent.session_id or "",
+                ) or ""
+            else:
+                ext_prefetch_cache = agent._memory_manager.prefetch_all(
+                    _query,
+                    session_id=agent.session_id or "",
+                ) or ""
         except Exception:
             pass
 
