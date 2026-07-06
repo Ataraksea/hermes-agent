@@ -454,6 +454,13 @@ def _is_kimi_coding_endpoint(base_url: str | None) -> bool:
         return False
     return normalized.rstrip("/").lower().startswith("https://api.kimi.com/coding")
 
+def _is_claude_platform_on_aws_endpoint(base_url: str | None) -> bool:
+    """Return True for Claude Platform on AWS endpoint that requires """
+    normalized = _normalize_base_url_text(base_url)
+    if not normalized:
+        return False
+    return normalized.rstrip("/").lower().startswith("https://aws-external-anthropic")
+
 
 # Model-name prefixes that identify the Kimi / Moonshot family.  Covers
 # - official slugs: ``kimi-k2.5``, ``kimi_thinking``, ``moonshot-v1-8k``
@@ -813,6 +820,13 @@ def build_anthropic_client(
         kwargs["api_key"] = api_key
         kwargs["default_headers"] = {
             "User-Agent": "claude-code/0.1.0",
+            **( {"anthropic-beta": ",".join(common_betas)} if common_betas else {} )
+        }
+    elif _is_claude_platform_on_aws_endpoint(base_url):
+        kwargs["api_key"] = api_key
+        anthropic_workspace_id = os.environ.get('ANTHROPIC_WORKSPACE_ID')
+        kwargs["default_headers"] =  {
+            **( {"anthropic-workspace-id": anthropic_workspace_id} if anthropic_workspace_id else {}),
             **( {"anthropic-beta": ",".join(common_betas)} if common_betas else {} )
         }
     elif _requires_bearer_auth(normalized_base_url):
