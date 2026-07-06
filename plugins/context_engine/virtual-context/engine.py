@@ -140,7 +140,6 @@ class VirtualContextAdapter(ContextEngine):
         else:
             candidates = [
                 Path(self._hermes_home) / "virtual-context.yaml",
-                Path(self._hermes_home) / "virtual-context" / "virtual-context.yaml",
             ]
             for c in candidates:
                 if c.is_file():
