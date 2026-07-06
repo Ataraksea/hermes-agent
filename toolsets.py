@@ -55,6 +55,9 @@ _HERMES_CORE_TOOLS = [
     "kanban_attach", "kanban_attach_url", "kanban_attachments",
     # Computer use (macOS, gated on cua-driver being installed via check_fn)
     #"computer_use",
+    "mcp__agentmemory__memory_recall", "mcp__agentmemory__memory_save", "mcp__agentmemory__memory_patterns", "mcp__agentmemory__memory_smart_search", "mcp__agentmemory__memory_vision_search",
+    "mcp__codegraph__codegraph_explore",
+    "mcp__virtual_context_recall_context", "mcp__virtual_context_expand_topic", "mcp__virtual_context_find_quote", "mcp__virtual_context_search_summaries"
 ]
 
 # Webhook events may originate from untrusted third-party content (for example,
