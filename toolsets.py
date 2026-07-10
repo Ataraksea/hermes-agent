@@ -57,6 +57,8 @@ _HERMES_CORE_TOOLS = [
     # Computer use (macOS, gated on cua-driver being installed via check_fn)
     "computer_use",
     "mcp__codegraph__codegraph_explore",
+     "lcm_grep", "lcm_load_session", "lcm_describe", "lcm_expand",
+    # "lcm_expand_query", "lcm_status", "lcm_inspect", "lcm_doctor"
     # "hindsight_recall", "hindsight_reflect", "hindsight_retain"
 ]
 
