@@ -43,7 +43,8 @@ _HERMES_CORE_TOOLS = [
     "skills_list", "skill_view", "skill_manage",
     # "browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_scroll", "browser_back", "browser_press", "browser_get_images", "browser_vision", "browser_console", "browser_cdp", "browser_dialog",
     "todo", "clarify",
-    #"memory", "session_search"
+    "memory",
+    "session_search",
     "execute_code", "delegate_task",
     #"cronjob",
     # Home Assistant smart home control (gated on HASS_TOKEN via check_fn)
@@ -54,10 +55,9 @@ _HERMES_CORE_TOOLS = [
     "kanban_unblock",
     "kanban_attach", "kanban_attach_url", "kanban_attachments",
     # Computer use (macOS, gated on cua-driver being installed via check_fn)
-    #"computer_use",
-    "mcp__agentmemory__memory_recall", "mcp__agentmemory__memory_save", "mcp__agentmemory__memory_patterns", "mcp__agentmemory__memory_smart_search", "mcp__agentmemory__memory_vision_search",
+    "computer_use",
     "mcp__codegraph__codegraph_explore",
-    "mcp__virtual_context_recall_context", "mcp__virtual_context_expand_topic", "mcp__virtual_context_find_quote", "mcp__virtual_context_search_summaries"
+    # "hindsight_recall", "hindsight_reflect", "hindsight_retain"
 ]
 
 # Webhook events may originate from untrusted third-party content (for example,
