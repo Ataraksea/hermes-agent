@@ -58,8 +58,7 @@ _HERMES_CORE_TOOLS = [
     "computer_use",
     "mcp__codegraph__codegraph_explore",
     "lcm_grep", "lcm_load_session", "lcm_describe", "lcm_expand",
-    "headroom_retrieve",
-    # "lcm_expand_query", "lcm_status", "lcm_inspect", "lcm_doctor"
+    # "aphrodite_retrieve",
     # "hindsight_recall", "hindsight_reflect", "hindsight_retain"
 ]
 
